@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Clean Architecture: Domain references nothing. -->
+
+</Project>

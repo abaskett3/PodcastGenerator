@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- Test-only MP3 decoder, used to check the encoded output (AC-53). MIT/LGPL dual licensed. -->
+    <PackageReference Include="NLayer" Version="2.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PodcastGenerator.Domain\PodcastGenerator.Domain.csproj" />
+    <ProjectReference Include="..\..\src\PodcastGenerator.Application\PodcastGenerator.Application.csproj" />
+    <ProjectReference Include="..\..\src\PodcastGenerator.Infrastructure\PodcastGenerator.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\PodcastGenerator.Cli\PodcastGenerator.Cli.csproj" />
+  </ItemGroup>
+
+</Project>

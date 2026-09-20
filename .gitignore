@@ -488,6 +488,8 @@ $RECYCLE.BIN/
 .env.*
 !.env.example
 config.env
+# The key file in the runtime folder (PodcastGenerator.env) and any other .env file: never committed
+*.env
 secrets.json
 appsettings.*.local.json
 

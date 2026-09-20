@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Clean Architecture: Cli is the composition root. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>PodcastGenerator</AssemblyName>
+    <RootNamespace>PodcastGenerator.Cli</RootNamespace>
+    <!-- A self-contained Linux executable otherwise needs the system ICU library to start. The app has no culture
+         dependent behavior (all formatting is invariant), so invariant mode is safe:
+         https://learn.microsoft.com/dotnet/core/runtime-config/globalization -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PodcastGenerator.Application\PodcastGenerator.Application.csproj" />
+    <ProjectReference Include="..\PodcastGenerator.Infrastructure\PodcastGenerator.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>
