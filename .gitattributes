@@ -1,2 +1,4 @@
 # Shell scripts run on Linux and in Git Bash on Windows runners: they must keep LF line endings.
 *.sh text eol=lf
+# The embedded default resources keep LF, so the default style file is identical on every platform.
+src/PodcastGenerator.Infrastructure/Resources/*.md text eol=lf

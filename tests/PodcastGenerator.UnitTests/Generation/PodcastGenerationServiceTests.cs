@@ -66,7 +66,7 @@ public class PodcastGenerationServiceTests
         Assert.Single(direction);
         Assert.Contains("# AUDIO PROFILE", direction[0]);
         Assert.Contains("### DIRECTOR'S NOTES", direction[0]);
-        Assert.All(fixture.Speech.Requests, request => Assert.Contains("#### TRANSCRIPT\n", request.Input));
+        Assert.All(fixture.Speech.Requests, request => Assert.Matches(@"#### TRANSCRIPT\r?\n", request.Input));
         Assert.Single(fixture.Speech.Requests.Select(request => (request.Model, request.Voice, request.ResponseFormat)).Distinct());
         Assert.Equal(3, fixture.Speech.Requests.Select(request => request.Input).Distinct().Count());
     }
