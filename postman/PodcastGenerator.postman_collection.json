@@ -1,0 +1,238 @@
+{
+  "info": {
+    "name": "PodcastGenerator: OpenRouter speech",
+    "_postman_id": "2f4b1c7e-5d0a-4a58-9d1e-3a7c9e1b5d20",
+    "description": "Hand-run requests for OpenRouter's text-to-speech endpoint, `POST /api/v1/audio/speech`, with the model the app uses (`google/gemini-3.1-flash-tts-preview`, voice `Umbriel`).\n\nSet the collection variable `OPENROUTER_API_KEY` to your own key (Postman: collection Variables tab, or better, an environment marked as a secret). Never commit a real key: this file holds only the variable name.\n\nSources: https://openrouter.ai/docs/guides/overview/multimodal/tts and https://ai.google.dev/gemini-api/docs/speech-generation .",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{OPENROUTER_API_KEY}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://openrouter.ai/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "model",
+      "value": "google/gemini-3.1-flash-tts-preview",
+      "type": "string"
+    },
+    {
+      "key": "voice",
+      "value": "Umbriel",
+      "type": "string"
+    },
+    {
+      "key": "OPENROUTER_API_KEY",
+      "value": "",
+      "type": "secret",
+      "description": "Your OpenRouter API key. Leave empty in the file."
+    }
+  ],
+  "item": [
+    {
+      "name": "Speech: plain transcript (pcm)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/audio/speech",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "audio",
+            "speech"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"model\": \"{{model}}\",\n  \"voice\": \"{{voice}}\",\n  \"response_format\": \"pcm\",\n  \"input\": \"# AUDIO PROFILE: The Host\\n## A late-night community radio presenter for a small, strange desert town.\\n\\n## THE SCENE\\nA small, dim radio booth after dark. A single lamp, a microphone, a faint hum of equipment. The host reads the evening's\\nannouncements to the town with total calm, as if this were the most ordinary broadcast in the world.\\n\\n### DIRECTOR'S NOTES\\nStyle: Deadpan and warm. The host is completely at ease and treats strange, ominous or bureaucratic news as routine\\ncivic business. No dramatic emphasis on frightening words, no spooky effects, no announcer bombast. Intimate, as if\\nspeaking to a neighbor. Occasional quiet, more personal asides.\\nPacing: Slow to moderate, steady and unhurried. A beat of silence after short declarative lines and before a change of\\nsubject. Lists are read evenly.\\nAccent: Neutral, natural American English, no exaggerated regional features.\\n\\n#### TRANSCRIPT\\nGood evening, listeners. The sky above our town is a particular shade of purple tonight. We will now continue with the news.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "The app's prompt layout (audio profile, scene, director's notes, then the transcript; see docs/style-guide.md section 9.1), with a short transcript. Verified: the profile, scene and notes are used for direction and were not read aloud in this call. The response body is raw audio, not JSON: signed 16-bit little-endian PCM, one channel, 24000 Hz (the Content-Type header reads `audio/pcm; rate=24000; channels=1`). Use Send and Download, then open the file as raw audio. Each call costs real money (about $0.03 per minute of audio at $20 per million output tokens, 25 tokens per second of audio). This collection is for trying calls by hand. It is not part of `dotnet test` or CI, and the coding agents do not run it."
+      },
+      "response": []
+    },
+    {
+      "name": "Speech: whisper tag",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/audio/speech",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "audio",
+            "speech"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"model\": \"{{model}}\",\n  \"voice\": \"{{voice}}\",\n  \"response_format\": \"pcm\",\n  \"input\": \"# AUDIO PROFILE: The Host\\n## A late-night community radio presenter for a small, strange desert town.\\n\\n## THE SCENE\\nA small, dim radio booth after dark. A single lamp, a microphone, a faint hum of equipment. The host reads the evening's\\nannouncements to the town with total calm, as if this were the most ordinary broadcast in the world.\\n\\n### DIRECTOR'S NOTES\\nStyle: Deadpan and warm. The host is completely at ease and treats strange, ominous or bureaucratic news as routine\\ncivic business. No dramatic emphasis on frightening words, no spooky effects, no announcer bombast. Intimate, as if\\nspeaking to a neighbor. Occasional quiet, more personal asides.\\nPacing: Slow to moderate, steady and unhurried. A beat of silence after short declarative lines and before a change of\\nsubject. Lists are read evenly.\\nAccent: Neutral, natural American English, no exaggerated regional features.\\n\\n#### TRANSCRIPT\\n[whispers] The sky is turning that shade of purple again. Please remain calm, and stay indoors.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "A delivery direction such as `(WHISPERED)` in a script becomes the inline tag `[whispers]`. In the capped verification calls `[whispers]` produced a whisper in 4 of 5 runs and `[whispered]` in 1 of 5. The response body is raw audio, not JSON: signed 16-bit little-endian PCM, one channel, 24000 Hz (the Content-Type header reads `audio/pcm; rate=24000; channels=1`). Use Send and Download, then open the file as raw audio. Each call costs real money (about $0.03 per minute of audio at $20 per million output tokens, 25 tokens per second of audio). This collection is for trying calls by hand. It is not part of `dotnet test` or CI, and the coding agents do not run it."
+      },
+      "response": []
+    },
+    {
+      "name": "Speech: short pause tag",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/audio/speech",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "audio",
+            "speech"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"model\": \"{{model}}\",\n  \"voice\": \"{{voice}}\",\n  \"response_format\": \"pcm\",\n  \"input\": \"# AUDIO PROFILE: The Host\\n## A late-night community radio presenter for a small, strange desert town.\\n\\n## THE SCENE\\nA small, dim radio booth after dark. A single lamp, a microphone, a faint hum of equipment. The host reads the evening's\\nannouncements to the town with total calm, as if this were the most ordinary broadcast in the world.\\n\\n### DIRECTOR'S NOTES\\nStyle: Deadpan and warm. The host is completely at ease and treats strange, ominous or bureaucratic news as routine\\ncivic business. No dramatic emphasis on frightening words, no spooky effects, no announcer bombast. Intimate, as if\\nspeaking to a neighbor. Occasional quiet, more personal asides.\\nPacing: Slow to moderate, steady and unhurried. A beat of silence after short declarative lines and before a change of\\nsubject. Lists are read evenly.\\nAccent: Neutral, natural American English, no exaggerated regional features.\\n\\n#### TRANSCRIPT\\nThe council has made an announcement. [short pause] The library will close early on Tuesday.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "A `(BEAT)` line becomes `[short pause]`. The tag was not spoken aloud in any checked run and lengthened the gap, but the length varies from run to run. The response body is raw audio, not JSON: signed 16-bit little-endian PCM, one channel, 24000 Hz (the Content-Type header reads `audio/pcm; rate=24000; channels=1`). Use Send and Download, then open the file as raw audio. Each call costs real money (about $0.03 per minute of audio at $20 per million output tokens, 25 tokens per second of audio). This collection is for trying calls by hand. It is not part of `dotnet test` or CI, and the coding agents do not run it."
+      },
+      "response": []
+    },
+    {
+      "name": "Speech: timed pause tag",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/audio/speech",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "audio",
+            "speech"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"model\": \"{{model}}\",\n  \"voice\": \"{{voice}}\",\n  \"response_format\": \"pcm\",\n  \"input\": \"# AUDIO PROFILE: The Host\\n## A late-night community radio presenter for a small, strange desert town.\\n\\n## THE SCENE\\nA small, dim radio booth after dark. A single lamp, a microphone, a faint hum of equipment. The host reads the evening's\\nannouncements to the town with total calm, as if this were the most ordinary broadcast in the world.\\n\\n### DIRECTOR'S NOTES\\nStyle: Deadpan and warm. The host is completely at ease and treats strange, ominous or bureaucratic news as routine\\ncivic business. No dramatic emphasis on frightening words, no spooky effects, no announcer bombast. Intimate, as if\\nspeaking to a neighbor. Occasional quiet, more personal asides.\\nPacing: Slow to moderate, steady and unhurried. A beat of silence after short declarative lines and before a change of\\nsubject. Lists are read evenly.\\nAccent: Neutral, natural American English, no exaggerated regional features.\\n\\n#### TRANSCRIPT\\nThe council has made an announcement. [pause for 3 seconds] The library will close early on Tuesday.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "A `(PAUSE - 3 SECONDS)` line becomes `[pause for 3 seconds]`. The model follows the duration only roughly: measured gaps for a requested 3 seconds were 2.3 to 4.7 seconds. The response body is raw audio, not JSON: signed 16-bit little-endian PCM, one channel, 24000 Hz (the Content-Type header reads `audio/pcm; rate=24000; channels=1`). Use Send and Download, then open the file as raw audio. Each call costs real money (about $0.03 per minute of audio at $20 per million output tokens, 25 tokens per second of audio). This collection is for trying calls by hand. It is not part of `dotnet test` or CI, and the coding agents do not run it."
+      },
+      "response": []
+    },
+    {
+      "name": "List speech models (no key needed)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "auth": {
+          "type": "noauth"
+        },
+        "url": {
+          "raw": "https://openrouter.ai/api/v1/models?output_modalities=speech",
+          "protocol": "https",
+          "host": [
+            "openrouter",
+            "ai"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "models"
+          ],
+          "query": [
+            {
+              "key": "output_modalities",
+              "value": "speech"
+            }
+          ]
+        },
+        "description": "Lists the speech models. The entry for `google/gemini-3.1-flash-tts-preview` has `supported_voices` (including `Umbriel`) and pricing of $0.000001 per prompt token and $0.00002 per completion token."
+      },
+      "response": []
+    },
+    {
+      "name": "Model endpoint details (no key needed)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "auth": {
+          "type": "noauth"
+        },
+        "url": {
+          "raw": "https://openrouter.ai/api/v1/models/google/gemini-3.1-flash-tts-preview/endpoints",
+          "protocol": "https",
+          "host": [
+            "openrouter",
+            "ai"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "models",
+            "google",
+            "gemini-3.1-flash-tts-preview",
+            "endpoints"
+          ]
+        },
+        "description": "Shows the provider limits: `max_prompt_tokens` 8192 and `max_completion_tokens` 16384."
+      },
+      "response": []
+    }
+  ]
+}

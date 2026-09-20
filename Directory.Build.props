@@ -1,0 +1,15 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Development builds report this placeholder. The release workflow passes the version on the command line (the Version
+         MSBuild property), so the release version is never stored in a repo file (CLAUDE.md, "Source Control"). -->
+    <Version>0.0.0-dev</Version>
+    <!-- Keep the version option output exactly equal to the release version: no "+<commit>" suffix on the informational version. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+</Project>

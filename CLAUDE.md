@@ -11,12 +11,14 @@ script are direction only; they are not rendered as sound.
 
 ## Current state
 
-The repo is not scaffolded yet: there is no solution, no projects, no tests, no README.md and no `/postman`
-collection. The GitHub repo is <https://github.com/abaskett3/PodcastGenerator> (`origin`); `main` holds the project
-instructions, agents, templates and docs, and no code yet. The initial-development spec is being written in
-`docs/specs/initial-development.md`. Commands and
-architecture below describe the intended design. Replace this section once the scaffolding lands, and resolve the
-"confirm after scaffolding" notes.
+The initial-development feature (`docs/specs/initial-development.md`) has scaffolded the repo: `PodcastGenerator.sln`;
+the projects `src/PodcastGenerator.Domain`, `src/PodcastGenerator.Application`, `src/PodcastGenerator.Infrastructure` and
+`src/PodcastGenerator.Cli` (the executable is named `PodcastGenerator`); the xUnit project
+`tests/PodcastGenerator.UnitTests`; `README.md`; the Postman collection `postman/PodcastGenerator.postman_collection.json`;
+and the GitHub Actions workflows in `.github/workflows/` (`pull-request.yml`, `pull-request-title.yml`, `release.yml`) with
+their helper scripts in `.github/scripts/`. The GitHub repo is <https://github.com/abaskett3/PodcastGenerator>
+(`origin`). What was verified against the real API, the audio library choice, the chunk size and the open findings are in
+`docs/designs/initial-development.md`.
 
 ## Usage
 
@@ -62,8 +64,8 @@ architecture below describe the intended design. Replace this section once the s
 - Build: `dotnet build -warnaserror`
 - Test: `dotnet test`
 - Single test: `dotnet test --filter "FullyQualifiedName~<TestName>"`
-- Run: `dotnet run --project src/PodcastGenerator.Cli -- <scriptPath> [outputPath]` (confirm project path after scaffolding)
-- Publish the executable (intended, confirm after scaffolding):
+- Run: `dotnet run --project src/PodcastGenerator.Cli -- <scriptPath> [outputPath]`
+- Publish the executable:
   `dotnet publish src/PodcastGenerator.Cli -c Release -r <rid> --self-contained -p:PublishSingleFile=true`
   with `<rid>` = `win-x64` and `linux-x64`
 
@@ -76,8 +78,8 @@ architecture below describe the intended design. Replace this section once the s
 - A third-party audio library is acceptable, for joining audio, MP3 encoding and channel handling. It must work on
   `win-x64` and `linux-x64` inside a self-contained single-file executable. Research the options and record the choice
   and its license in the design doc.
-- Postman collection in `/postman` for a person to try OpenRouter speech calls by hand (confirm after scaffolding).
-  It is not part of `dotnet test` or CI, and agents don't run it.
+- Postman collection in `/postman` (`PodcastGenerator.postman_collection.json`) for a person to try OpenRouter speech calls
+  by hand. It is not part of `dotnet test` or CI, and agents don't run it.
 
 ## Source Control
 
@@ -114,7 +116,8 @@ architecture below describe the intended design. Replace this section once the s
 
 ## Architecture
 
-- Clean Architecture: Domain, Application, Infrastructure, Cli (confirm project names after scaffolding)
+- Clean Architecture: `PodcastGenerator.Domain`, `PodcastGenerator.Application`, `PodcastGenerator.Infrastructure` and
+  `PodcastGenerator.Cli`, under `src/`; unit tests in `tests/PodcastGenerator.UnitTests`
 - Dependency injection everywhere; no `new` for services
 - All OpenRouter/HTTP code lives in Infrastructure behind an interface in Application
 - Async methods end in `Async` and accept a `CancellationToken`
@@ -180,7 +183,7 @@ failure). The GitHub MCP server is not used.
 - Pipeline artifacts live in `docs/` (`specs/`, `designs/`, `testing/`, `bugs/`, `reviews/`) and are committed. The
   script and style guides (`docs/script-writing-guide.md`, `docs/style-guide.md`) and `docs/sample-scripts/` live there
   too.
-- README.md does not exist yet. Create it during scaffolding.
+- README.md exists at the repo root.
 - README.md must cover: dev environment setup, build and test, how to run and use the app, and where the key file goes.
 - Update the README whenever CLI arguments or setup steps change.
 
