@@ -1,0 +1,253 @@
+name: Release
+
+# Runs on every push to main (a squash-merged pull request). It decides from the squash commit whether to release, re-runs
+# the tests on Windows and Linux, publishes the win-x64 and linux-x64 single-file executables and only then creates the
+# tag and the GitHub Release. It never commits or pushes to a branch and stores no version in the repository.
+# The version is computed here from the latest v* tag and the conventional-commit subject and body (CLAUDE.md, "Source Control").
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# One release at a time. queue: max keeps every waiting run instead of replacing the pending one with the newest
+# (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency), so two merges in quick
+# succession are processed in order and the second sees the first one's tag.
+concurrency:
+  group: release
+  queue: max
+
+jobs:
+  plan:
+    name: Plan release
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      version: ${{ steps.plan.outputs.version }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - name: Check out the pushed commit and all tags
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Decide whether to release and which version
+        id: plan
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+          # The files this push changed. A squash merge adds exactly one commit. If the before-commit is unknown (for
+          # example the very first push), list the files of the pushed commit itself.
+          if [[ -n "$BEFORE_SHA" && ! "$BEFORE_SHA" =~ ^0+$ ]] && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            git diff --name-only -z --no-renames "$BEFORE_SHA" "$sha" > changed-files.bin
+          else
+            git show --pretty=format: --name-only -z --no-renames "$sha" > changed-files.bin
+          fi
+          classification="$(bash .github/scripts/classify-changes.sh < changed-files.bin)"
+          echo "$classification"
+          if [[ "$classification" != "code=true" ]]; then
+            echo "Only ignored files changed: no tag and no release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The squash commit's subject is the pull request title; its body is the commit details.
+          export COMMIT_SUBJECT="$(git log -1 --format=%s "$sha")"
+          export COMMIT_BODY="$(git log -1 --format=%b "$sha")"
+          export EXISTING_TAGS="$(git tag --list 'v*')"
+          if ! result="$(bash .github/scripts/compute-release.sh 2> release-error.txt)"; then
+            echo "::error title=Release::$(cat release-error.txt)"
+            exit 1
+          fi
+          echo "$result"
+          bump="$(sed -n 's/^bump=//p' <<< "$result")"
+          if [[ "$bump" == "none" ]]; then
+            echo "The commit subject '$COMMIT_SUBJECT' does not call for a release (feat, fix or a breaking change)."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version="$(sed -n 's/^version=//p' <<< "$result")"
+          echo "Releasing v$version ($bump) from $sha"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Release test (${{ matrix.name }})
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            os: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the commit to release
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - name: Set up the .NET 10 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build with the release version
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: dotnet build -warnaserror -p:Version="$VERSION"
+
+      - name: Test
+        run: dotnet test --no-build
+
+  package:
+    name: Package ${{ matrix.rid }}
+    needs: [plan, test]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+            executable: PodcastGenerator.exe
+            extension: zip
+          - rid: linux-x64
+            os: ubuntu-latest
+            executable: PodcastGenerator
+            extension: tar.gz
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the commit to release
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - name: Set up the .NET 10 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish a self-contained single-file executable
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: >
+          dotnet publish src/PodcastGenerator.Cli -c Release -r "${{ matrix.rid }}" --self-contained
+          -p:PublishSingleFile=true -p:Version="$VERSION" -o "publish/${{ matrix.rid }}"
+
+      - name: Check the executable reports the release version and starts without arguments
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          exe="publish/${{ matrix.rid }}/${{ matrix.executable }}"
+          # tr removes the carriage return that a Windows console program writes at the end of a line.
+          reported="$("$exe" --version | tr -d '\r')"
+          if [[ "$reported" != "$VERSION" ]]; then
+            echo "::error title=Version::The executable reports '$reported' but the release version is '$VERSION'."
+            exit 1
+          fi
+          # With no arguments the tool prints the usage and exits 1 (AC-16, AC-56).
+          set +e
+          "$exe" > /dev/null 2> usage.txt
+          code=$?
+          set -e
+          grep -q '<scriptPath> \[outputPath\]' usage.txt
+          [[ "$code" -eq 1 ]]
+
+      - name: Create the archive
+        id: archive
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="PodcastGenerator-${VERSION}-${{ matrix.rid }}.${{ matrix.extension }}"
+          if [[ "${{ matrix.extension }}" == "zip" ]]; then
+            powershell -NoProfile -Command "Compress-Archive -Path 'publish/${{ matrix.rid }}/${{ matrix.executable }}' -DestinationPath '$name'"
+          else
+            tar -czf "$name" -C "publish/${{ matrix.rid }}" "${{ matrix.executable }}"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.rid }}
+          path: ${{ steps.archive.outputs.name }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: [plan, package]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      SHA: ${{ needs.plan.outputs.sha }}
+    steps:
+      - name: Check out the commit to release
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - name: Download the archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: assets
+          merge-multiple: true
+
+      - name: Make sure the tag does not exist yet
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" > /dev/null; then
+            echo "::error title=Tag exists::The tag v${VERSION} already exists. The workflow never moves, deletes or overwrites a tag."
+            exit 1
+          fi
+
+      - name: Create the tag on the built commit
+        id: tag
+        run: |
+          set -euo pipefail
+          # The tag is created with git, not through the releases API: the releases API refuses a target commit that
+          # changes workflow files when it is called with the workflow token
+          # (https://docs.github.com/en/rest/releases/releases#create-a-release). A tag on a commit that is already on
+          # main adds no new objects.
+          git tag "v${VERSION}" "$SHA"
+          git push origin "refs/tags/v${VERSION}"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create the GitHub Release
+        run: |
+          set -euo pipefail
+          ls -l assets
+          # With assets, gh creates a draft, uploads them and publishes it only when every upload succeeded.
+          gh release create "v${VERSION}" assets/* \
+            --verify-tag \
+            --title "v${VERSION}" \
+            --generate-notes \
+            --latest
+
+      - name: Remove the tag this run created if the release could not be published
+        if: failure() && steps.tag.outputs.created == 'true'
+        run: |
+          # Neither the tag nor the release may exist after a failure. Only the tag this run just created is removed.
+          git push origin --delete "refs/tags/v${VERSION}" || true
