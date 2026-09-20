@@ -12,8 +12,9 @@ script are direction only; they are not rendered as sound.
 ## Current state
 
 The repo is not scaffolded yet: there is no solution, no projects, no tests, no README.md and no `/postman`
-collection. The GitHub repo is <https://github.com/abaskett3/PodcastGenerator> (`origin`); the first commit holds only
-`.gitignore`. The initial-development spec is being written in `docs/specs/initial-development.md`. Commands and
+collection. The GitHub repo is <https://github.com/abaskett3/PodcastGenerator> (`origin`); `main` holds the project
+instructions, agents, templates and docs, and no code yet. The initial-development spec is being written in
+`docs/specs/initial-development.md`. Commands and
 architecture below describe the intended design. Replace this section once the scaffolding lands, and resolve the
 "confirm after scaffolding" notes.
 
@@ -23,8 +24,9 @@ architecture below describe the intended design. Replace this section once the s
   case-insensitively (`.TXT` works); `.md` and any other extension are rejected. Markdown is not supported, so its
   rules can't be confused with the script's own format. An empty script, or one that has only cues, is rejected with
   an error and no API call.
-- Output: optional path for the audio file. MP3 is the preferred format. The file has two channels, with the mono
-  voice centered in both ears, for stereo headphones.
+- Output: optional path for the audio file. MP3 is the preferred format, and an output path with any other extension is
+  an error that names the required one. The file has two channels, with the mono voice centered in both ears, for
+  stereo headphones.
 - Default output directory: `PodcastGenerator/` under the user profile folder. Resolve it with
   `Environment.SpecialFolder.UserProfile` so it works on Windows and Linux; don't use a literal `%USERPROFILE%`.
 - Default file name: `Podcast-MM-DD-YYYY` (the date as month-day-year) plus the format's extension. If that file
@@ -38,11 +40,18 @@ architecture below describe the intended design. Replace this section once the s
 - The API key is in `PodcastGenerator.env` in that folder, as the line `OPENROUTER_API_KEY=<key>`. The
   `OPENROUTER_API_KEY` env var is also supported; if both are set, the key file wins. .NET user-secrets are not
   supported. If no key is found, exit with a helpful, descriptive error that says where the key file goes and what it
-  must contain.
+  must contain. The key file parser tolerates a BOM and either line ending, ignores blank lines and `#` lines, trims
+  spaces and one pair of quotes, ignores other keys, lets the last duplicate win, and treats an empty value as missing.
 - Narration: a single speaker with the `Umbriel` voice. Speaker names in the script are stripped. A delivery direction
   is converted to an inline tag placed before its line's text, and a pause is passed to the model as a pause tag. SFX
-  and music cues are removed silently. The script is narrated as written; the tool does not rewrite or check it.
+  and music cues are removed silently. Emphasis marked with `*asterisks*` is converted to an emphasis tag. The exact
+  tag syntax for delivery, pause and emphasis tags is verified before it is hardcoded. The script is narrated as
+  written; the tool does not rewrite or check it.
+- Long scripts are split inside the tool, at segment and then paragraph boundaries, and never between a delivery tag
+  and its text. An oversized paragraph is split at a sentence end, with a warning. Every chunk gets the same profile
+  and director's notes, and the chunk size is set from measurement, not guessed.
 - If a chunk of the script can't be narrated, retry it up to 5 times, then fail the whole run.
+- Exit code 0 on success and 1 on any failure. The error message says what went wrong.
 - Script format and spoken-copy rules: `docs/script-writing-guide.md`. Narration style: `docs/style-guide.md`. Sample
   scripts: `docs/sample-scripts/`.
 
@@ -80,7 +89,12 @@ architecture below describe the intended design. Replace this section once the s
 - Pull requests are squash-merged, so the squash commit subject (the PR title) decides the bump. It must be a
   conventional commit: `fix:` -> PATCH, `feat:` -> MINOR, a breaking change (`!` after the type or a
   `BREAKING CHANGE:` footer, such as a changed or removed CLI argument or output format) -> MAJOR. A merge with none of
-  these (`refactor:`, `test:`, `chore:`, `ci:`, ...) publishes no release.
+  these (`refactor:`, `test:`, `chore:`, `ci:`, ...) publishes no release. With no `v*` tag yet, the first merge that
+  does release publishes `1.0.0` with no bump applied. Pushes that only touch ignored paths, like the docs-only
+  commits made before any code exists, create no version. The latest tag is the highest by SemVer, and a `v*` tag that
+  isn't `vMAJOR.MINOR.PATCH` fails the workflow with a message naming it.
+- The repo's default squash message is "Pull request title and commit details": the PR title is the subject and the
+  commit details are the body. The release workflow reads both, so a `BREAKING CHANGE:` footer in a commit counts.
 - CI computes the version: on a merge to `main` it reads the latest `v*` tag, bumps it, and passes the result to the
   build, then tags and releases. The version is not stored in a file in the repo and CI does not commit to `main`.
   This is to be revisited.
