@@ -273,7 +273,7 @@ public class PodcastGenerationServiceTests
         var exception = await Assert.ThrowsAsync<UserFacingException>(() => fixture.RunAsync());
 
         Assert.Contains(fixture.Paths.KeyFilePath, exception.Message);
-        Assert.Contains("OPENROUTER_API_KEY=<", exception.Message);
+        Assert.Contains("OPENROUTER_API_KEY=<key>", exception.Message, StringComparison.Ordinal);
         Assert.Empty(fixture.Speech.Requests);
     }
 

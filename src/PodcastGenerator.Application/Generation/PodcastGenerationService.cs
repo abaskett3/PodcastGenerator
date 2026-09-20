@@ -167,7 +167,7 @@ public sealed class PodcastGenerationService : IPodcastGenerationService
 
     private string MissingKeyMessage() =>
         $"No OpenRouter API key was found. Create the file '{_paths.KeyFilePath}' containing the line " +
-        $"{ApiKeyProvider.KeyName}=<your key>, or set the {ApiKeyProvider.KeyName} environment variable.";
+        $"{ApiKeyProvider.KeyName}=<key> (where <key> is your OpenRouter API key), or set the {ApiKeyProvider.KeyName} environment variable.";
 
     private async Task<SpeechAudio> SynthesizeWithRetriesAsync(
         NarrationChunk chunk,

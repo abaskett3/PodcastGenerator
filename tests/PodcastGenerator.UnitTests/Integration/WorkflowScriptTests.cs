@@ -112,6 +112,10 @@ public sealed class WorkflowScriptTests
     [InlineData("README.md")]
     [InlineData("src/PodcastGenerator.Cli/NOTES.md")]
     [InlineData("tests/deep/er/still/readme.md")]
+    [InlineData("README.MD")]
+    [InlineData("docs/Notes.Md")]
+    [InlineData("src/x/y.mD")]
+    [InlineData("Docs/Program.md")]
     public void A_change_to_only_an_ignored_file_is_not_code(string path)
     {
         Assert.Equal("code=false", Classify(path));
@@ -136,6 +140,14 @@ public sealed class WorkflowScriptTests
     [InlineData("sub/.gitignore")]
     [InlineData(".gitignore.bak")]
     [InlineData("file with spaces.cs")]
+    // Directory names and .gitignore are matched exactly (Linux file names are case-sensitive); only the .md extension is not.
+    [InlineData("Docs/Program.cs")]
+    [InlineData("DOCS/x.cs")]
+    [InlineData(".GitHub/workflows/release.yml")]
+    [InlineData(".Docs/notes.txt")]
+    [InlineData(".Claude/settings.json")]
+    [InlineData("Agent-Memory/notes.txt")]
+    [InlineData(".Gitignore")]
     public void A_change_to_a_file_outside_the_ignore_list_is_code(string path)
     {
         Assert.Equal("code=true", Classify(path));
@@ -242,6 +254,31 @@ public sealed class WorkflowScriptTests
         Assert.Equal(1, exitCode);
         Assert.Contains(badTag, error, StringComparison.Ordinal);
         Assert.DoesNotContain("version=", output, StringComparison.Ordinal);
+    }
+
+    // AC-69: a malformed v* tag fails the run whether or not this merge would release (the AC has no condition).
+    [Theory]
+    [InlineData("chore: update a dependency")]
+    [InlineData("docs: fix a typo")]
+    [InlineData("refactor: tidy up")]
+    [InlineData("Update the readme")]
+    [InlineData("")]
+    public void A_v_tag_that_is_not_MAJOR_MINOR_PATCH_fails_naming_the_tag_even_when_the_merge_would_not_release(string subject)
+    {
+        var (exitCode, output, error) = Compute(subject, "", "v1.0.0\nvNext\nv1.2.0");
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("vNext", error, StringComparison.Ordinal);
+        Assert.DoesNotContain("bump=", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_merge_that_does_not_release_with_only_valid_tags_still_succeeds_with_no_version()
+    {
+        var (exitCode, output, error) = Compute("chore: update a dependency", "", "v1.0.0\nv1.2.0");
+
+        Assert.True(exitCode == 0, error);
+        Assert.Equal("bump=none\n", output);
     }
 
     // AC-70: every released version is valid SemVer without a build number and is strictly greater than the previous one.

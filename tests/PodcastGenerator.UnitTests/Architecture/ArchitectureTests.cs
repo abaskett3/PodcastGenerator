@@ -267,24 +267,7 @@ public class ArchitectureTests
         }
     }
 
-    private static IEnumerable<string> SourceFiles() =>
-        Directory.EnumerateFiles(RepositoryFiles.Combine("src"), "*.cs", SearchOption.AllDirectories)
-            .Where(file => !IsBuildOutput(file));
+    private static IEnumerable<string> SourceFiles() => RepositoryScan.SourceFiles();
 
-    /// <summary>Files that could hold a key. <c>*.env</c> files (the user's key file and <c>config.env</c>) are never read.</summary>
-    private static IEnumerable<string> ScannedFiles()
-    {
-        var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ".cs", ".csproj", ".props", ".sln", ".md", ".json", ".yml", ".yaml", ".sh", ".txt", ".xml", ".gitignore", ".gitattributes",
-        };
-
-        return Directory.EnumerateFiles(RepositoryFiles.Root, "*", SearchOption.AllDirectories)
-            .Where(file => !IsBuildOutput(file) && !file.Contains(Path.Combine("", ".git", ""), StringComparison.Ordinal))
-            .Where(file => !file.EndsWith(".env", StringComparison.OrdinalIgnoreCase))
-            .Where(file => extensions.Contains(Path.GetExtension(file)) || Path.GetFileName(file).StartsWith('.'));
-    }
-
-    private static bool IsBuildOutput(string path) =>
-        path.Contains(Path.Combine("", "bin", ""), StringComparison.Ordinal) || path.Contains(Path.Combine("", "obj", ""), StringComparison.Ordinal);
+    private static IEnumerable<string> ScannedFiles() => RepositoryScan.ScannedFiles();
 }

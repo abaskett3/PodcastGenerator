@@ -21,10 +21,12 @@ public sealed class OpenRouterSpeechClient : ISpeechClient
     public const string SpeechPath = "audio/speech";
 
     private readonly HttpClient _httpClient;
+    private readonly SpeechClientOptions _options;
 
-    public OpenRouterSpeechClient(HttpClient httpClient)
+    public OpenRouterSpeechClient(HttpClient httpClient, SpeechClientOptions options)
     {
         _httpClient = httpClient;
+        _options = options;
     }
 
     public async Task<SpeechAudio> SynthesizeAsync(SpeechRequest request, ApiKey apiKey, CancellationToken cancellationToken)
@@ -40,18 +42,23 @@ public sealed class OpenRouterSpeechClient : ISpeechClient
         };
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey.Reveal());
 
+        // One time limit for the whole attempt: sending the request and reading the audio body. HttpClient.Timeout would not
+        // cover the body read here, because the response is read with ResponseHeadersRead, so a stalled body would wait forever.
+        using var attemptTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        attemptTimeout.CancelAfter(_options.RequestTimeout);
+
         try
         {
             using var response = await _httpClient
-                .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, attemptTimeout.Token)
                 .ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
             {
-                throw await FailureAsync(response, cancellationToken).ConfigureAwait(false);
+                throw await FailureAsync(response, attemptTimeout.Token).ConfigureAwait(false);
             }
 
-            var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+            var bytes = await response.Content.ReadAsByteArrayAsync(attemptTimeout.Token).ConfigureAwait(false);
             return ToAudio(response, bytes);
         }
         catch (HttpRequestException exception)
@@ -60,7 +67,7 @@ public sealed class OpenRouterSpeechClient : ISpeechClient
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
-            // Not the caller's cancellation: the HttpClient timeout elapsed.
+            // Not the caller's cancellation: the time limit of this attempt elapsed (or the connection timed out).
             throw new SpeechException("The request timed out.", null, null, isTransient: true, inner: exception);
         }
     }

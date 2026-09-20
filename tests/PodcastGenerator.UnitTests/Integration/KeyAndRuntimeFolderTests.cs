@@ -115,7 +115,7 @@ public sealed class KeyAndRuntimeFolderTests : IDisposable
         Assert.Empty(_pipeline.Out.ToString());
         var error = _pipeline.Err.ToString();
         Assert.Contains(_pipeline.Paths.KeyFilePath, error, StringComparison.Ordinal);
-        Assert.Contains("OPENROUTER_API_KEY=<key>", error.Replace("<your key>", "<key>"), StringComparison.Ordinal);
+        Assert.Contains("OPENROUTER_API_KEY=<key>", error, StringComparison.Ordinal);
         Assert.True(Directory.Exists(_pipeline.Paths.RuntimeFolder));
         Assert.False(File.Exists(_pipeline.DefaultOutputPath));
     }

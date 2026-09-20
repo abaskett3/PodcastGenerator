@@ -42,6 +42,18 @@ jobs:
           sha="$(git rev-parse HEAD)"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
+          # The squash commit's subject is the pull request title; its body is the commit details. The script also checks
+          # every v* tag, so a tag that is not vMAJOR.MINOR.PATCH fails the run even when this merge would not release (AC-69).
+          export COMMIT_SUBJECT="$(git log -1 --format=%s "$sha")"
+          export COMMIT_BODY="$(git log -1 --format=%b "$sha")"
+          export EXISTING_TAGS="$(git tag --list 'v*')"
+          if ! result="$(bash .github/scripts/compute-release.sh 2> release-error.txt)"; then
+            echo "::error title=Release::$(cat release-error.txt)"
+            exit 1
+          fi
+          echo "$result"
+          bump="$(sed -n 's/^bump=//p' <<< "$result")"
+
           # The files this push changed. A squash merge adds exactly one commit. If the before-commit is unknown (for
           # example the very first push), list the files of the pushed commit itself.
           if [[ -n "$BEFORE_SHA" && ! "$BEFORE_SHA" =~ ^0+$ ]] && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
@@ -57,16 +69,6 @@ jobs:
             exit 0
           fi
 
-          # The squash commit's subject is the pull request title; its body is the commit details.
-          export COMMIT_SUBJECT="$(git log -1 --format=%s "$sha")"
-          export COMMIT_BODY="$(git log -1 --format=%b "$sha")"
-          export EXISTING_TAGS="$(git tag --list 'v*')"
-          if ! result="$(bash .github/scripts/compute-release.sh 2> release-error.txt)"; then
-            echo "::error title=Release::$(cat release-error.txt)"
-            exit 1
-          fi
-          echo "$result"
-          bump="$(sed -n 's/^bump=//p' <<< "$result")"
           if [[ "$bump" == "none" ]]; then
             echo "The commit subject '$COMMIT_SUBJECT' does not call for a release (feat, fix or a breaking change)."
             echo "release=false" >> "$GITHUB_OUTPUT"
@@ -236,6 +238,7 @@ jobs:
           echo "created=true" >> "$GITHUB_OUTPUT"
 
       - name: Create the GitHub Release
+        id: release
         run: |
           set -euo pipefail
           ls -l assets
@@ -247,7 +250,9 @@ jobs:
             --latest
 
       - name: Remove the tag this run created if the release could not be published
-        if: failure() && steps.tag.outputs.created == 'true'
+        # failure() alone would skip a cancelled run (a cancelled run is not a failure), leaving a tag with no release (AC-72).
+        # The tag is removed only when this run created it and the release step did not finish.
+        if: (failure() || cancelled()) && steps.tag.outputs.created == 'true' && steps.release.outcome != 'success'
         run: |
           # Neither the tag nor the release may exist after a failure. Only the tag this run just created is removed.
           git push origin --delete "refs/tags/v${VERSION}" || true

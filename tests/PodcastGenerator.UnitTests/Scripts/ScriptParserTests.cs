@@ -179,12 +179,28 @@ public class ScriptParserTests
     [InlineData("[SFX: SOFT RADIO STATIC]")]
     [InlineData("[MUSIC: THEME - EERIE (FADE UP, THEN UNDER)]")]
     [InlineData("[FADE OUT]")]
+    [InlineData("[SFX: DOOR SLAM] [MUSIC: STING]")]
+    [InlineData("[SFX: DOOR SLAM][MUSIC: STING]")]
+    [InlineData("[SFX: DOOR [SLAM]]")]
     public void A_whole_line_cue_is_removed(string cue)
     {
         var script = _parser.Parse($"CECIL: Before.\n\n{cue}\n\nCECIL: (CONT'D) After.\n");
 
         Assert.Equal(["Before.", "After."], Speech(script).Select(block => block.PlainText));
         Assert.Empty(AllBlocks(script).OfType<PauseBlock>());
+    }
+
+    // AC-34, AC-36: a line is removed only when it is nothing but cues. Words before, between or after cues are kept as written.
+    [Theory]
+    [InlineData("[SFX: DOOR] and then he spoke [SFX: DOOR]")]
+    [InlineData("[SFX: DOOR] and then he spoke")]
+    [InlineData("and then he spoke [SFX: DOOR]")]
+    [InlineData("[SFX: DOOR] and then he spoke [SFX: DOOR] and more")]
+    public void Spoken_words_beside_cues_on_one_line_are_kept_as_written(string line)
+    {
+        var block = Assert.Single(Speech(_parser.Parse(line)));
+
+        Assert.Equal(line, block.PlainText);
     }
 
     [Fact]

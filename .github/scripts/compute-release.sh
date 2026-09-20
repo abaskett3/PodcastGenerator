@@ -37,13 +37,9 @@ if [[ "$subject" =~ $subject_pattern ]]; then
   fi
 fi
 
-echo "bump=$bump"
-if [[ "$bump" == none ]]; then
-  exit 0
-fi
-
 # The latest tag is the highest one by Semantic Versioning precedence. For plain MAJOR.MINOR.PATCH tags that is a
-# numeric comparison of the three parts.
+# numeric comparison of the three parts. Every v* tag is checked first, whether or not this merge releases: a v* tag that is
+# not vMAJOR.MINOR.PATCH fails the run with a message naming the tag (AC-69, "fails the workflow").
 tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 have_latest=false
 latest_major=0
@@ -68,6 +64,11 @@ while IFS= read -r tag; do
     latest_patch=$patch
   fi
 done <<< "$tags"
+
+echo "bump=$bump"
+if [[ "$bump" == none ]]; then
+  exit 0
+fi
 
 if [[ "$have_latest" == false ]]; then
   version="1.0.0"

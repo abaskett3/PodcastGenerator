@@ -2,8 +2,10 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using PodcastGenerator.Application.Abstractions;
 using PodcastGenerator.Domain.Security;
+using PodcastGenerator.Infrastructure;
 using PodcastGenerator.Infrastructure.Speech;
 using PodcastGenerator.UnitTests.Support;
 
@@ -18,6 +20,8 @@ public class OpenRouterSpeechClientTests
 {
     private static readonly ApiKey Key = new(TestKeys.Sentinel);
 
+    private static readonly SpeechClientOptions DefaultOptions = new(TimeSpan.FromMinutes(5));
+
     private static SpeechRequest Request(string input = "hello") =>
         new("google/gemini-3.1-flash-tts-preview", "Umbriel", input, SpeechAudioFormat.Pcm);
 
@@ -25,7 +29,7 @@ public class OpenRouterSpeechClientTests
     {
         var handler = new FakeHandler(respond);
         var http = new HttpClient(handler) { BaseAddress = OpenRouterSpeechClient.BaseAddress };
-        return (new OpenRouterSpeechClient(http), handler);
+        return (new OpenRouterSpeechClient(http, DefaultOptions), handler);
     }
 
     private static HttpResponseMessage Audio(byte[] bytes, string contentType = "audio/pcm; rate=24000; channels=1")
@@ -219,11 +223,88 @@ public class OpenRouterSpeechClientTests
     public async Task A_timeout_is_a_transient_failure()
     {
         var handler = new FakeHandler(_ => throw new TaskCanceledException("timeout", new TimeoutException()));
-        var client = new OpenRouterSpeechClient(new HttpClient(handler) { BaseAddress = OpenRouterSpeechClient.BaseAddress });
+        var client = new OpenRouterSpeechClient(new HttpClient(handler) { BaseAddress = OpenRouterSpeechClient.BaseAddress }, DefaultOptions);
 
         var exception = await Assert.ThrowsAsync<SpeechException>(() => client.SynthesizeAsync(Request(), Key, CancellationToken.None));
 
         Assert.True(exception.IsTransient);
+    }
+
+    // D-12 "network errors, timeouts": the headers arrive (200) but the audio body never finishes. HttpClient.Timeout does not
+    // cover this read (the response is read with ResponseHeadersRead), so the client's own time limit must end the attempt as a
+    // retryable timeout. WaitAsync makes the test fail rather than hang if the limit is missing.
+    [Fact]
+    public async Task A_body_that_stalls_after_the_headers_times_out_as_a_transient_failure()
+    {
+        var handler = new FakeHandler(_ => StalledBody(HttpStatusCode.OK));
+        var client = new OpenRouterSpeechClient(
+            new HttpClient(handler) { BaseAddress = OpenRouterSpeechClient.BaseAddress },
+            new SpeechClientOptions(TimeSpan.FromMilliseconds(200)));
+
+        var exception = await Assert.ThrowsAsync<SpeechException>(
+            () => client.SynthesizeAsync(Request(), Key, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30)));
+
+        Assert.True(exception.IsTransient);
+        Assert.Null(exception.StatusCode);
+        Assert.Contains("timed out", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task An_error_response_whose_body_stalls_also_times_out_as_a_transient_failure()
+    {
+        var handler = new FakeHandler(_ => StalledBody(HttpStatusCode.InternalServerError));
+        var client = new OpenRouterSpeechClient(
+            new HttpClient(handler) { BaseAddress = OpenRouterSpeechClient.BaseAddress },
+            new SpeechClientOptions(TimeSpan.FromMilliseconds(200)));
+
+        var exception = await Assert.ThrowsAsync<SpeechException>(
+            () => client.SynthesizeAsync(Request(), Key, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30)));
+
+        Assert.True(exception.IsTransient);
+    }
+
+    [Fact]
+    public async Task Cancelling_while_the_body_is_being_read_is_a_cancellation_not_a_timeout()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var handler = new FakeHandler(_ => StalledBody(HttpStatusCode.OK));
+        var client = new OpenRouterSpeechClient(
+            new HttpClient(handler) { BaseAddress = OpenRouterSpeechClient.BaseAddress },
+            new SpeechClientOptions(TimeSpan.FromMinutes(5)));
+
+        var call = client.SynthesizeAsync(Request(), Key, cancellation.Token);
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => call.WaitAsync(TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
+    public async Task A_body_that_arrives_in_time_is_not_cut_short_by_the_limit()
+    {
+        var handler = new FakeHandler(_ => Audio(new byte[8]));
+        var client = new OpenRouterSpeechClient(
+            new HttpClient(handler) { BaseAddress = OpenRouterSpeechClient.BaseAddress },
+            new SpeechClientOptions(TimeSpan.FromSeconds(30)));
+
+        var audio = await client.SynthesizeAsync(Request(), Key, CancellationToken.None);
+
+        Assert.Equal(8, audio.Data.Length);
+    }
+
+    // The registered limit is the documented 5 minutes, and HttpClient.Timeout is off so that there is one clock, not two.
+    [Fact]
+    public void The_registered_speech_timeout_is_five_minutes_and_the_client_owns_it()
+    {
+        var services = new ServiceCollection();
+        services.AddPodcastGeneratorInfrastructure();
+        using var provider = services.BuildServiceProvider();
+
+        var options = provider.GetRequiredService<SpeechClientOptions>();
+        var http = provider.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(ISpeechClient));
+
+        Assert.Equal(TimeSpan.FromMinutes(5), options.RequestTimeout);
+        Assert.Equal(Timeout.InfiniteTimeSpan, http.Timeout);
+        Assert.IsType<OpenRouterSpeechClient>(provider.GetRequiredService<ISpeechClient>());
     }
 
     // AC-42
@@ -243,7 +324,7 @@ public class OpenRouterSpeechClientTests
     public async Task Cancelling_while_the_request_is_in_flight_stops_it_with_a_cancellation_not_a_SpeechException()
     {
         using var cancellation = new CancellationTokenSource();
-        var client = new OpenRouterSpeechClient(new HttpClient(new HangingHandler(cancellation)) { BaseAddress = OpenRouterSpeechClient.BaseAddress });
+        var client = new OpenRouterSpeechClient(new HttpClient(new HangingHandler(cancellation)) { BaseAddress = OpenRouterSpeechClient.BaseAddress }, DefaultOptions);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.SynthesizeAsync(Request(), Key, cancellation.Token));
     }
@@ -257,6 +338,50 @@ public class OpenRouterSpeechClientTests
         var exception = await Assert.ThrowsAsync<SpeechException>(() => client.SynthesizeAsync(Request(), Key, CancellationToken.None));
 
         Assert.DoesNotContain(TestKeys.Sentinel, exception.ToString());
+    }
+
+    /// <summary>A response whose headers arrive at once and whose body never finishes (the connection stalls after the headers).</summary>
+    private static HttpResponseMessage StalledBody(HttpStatusCode status)
+    {
+        var response = new HttpResponseMessage(status) { Content = new StreamContent(new StalledStream()) };
+        response.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("audio/pcm; rate=24000; channels=1");
+        return response;
+    }
+
+    /// <summary>A read-only stream that never produces a byte and never ends. Only cancellation stops a read.</summary>
+    private sealed class StalledStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException("Only ReadAsync is expected.");
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     /// <summary>A server that never answers: Ctrl+C arrives (the token is cancelled) while the request is in flight.</summary>

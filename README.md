@@ -61,8 +61,10 @@ and names the file; deleting it restores the default.
 The tool needs an OpenRouter API key. Put it in a file named `PodcastGenerator.env` in the runtime folder, as one line:
 
 ```text
-OPENROUTER_API_KEY=<your key>
+OPENROUTER_API_KEY=<key>
 ```
+
+where `<key>` is your OpenRouter API key.
 
 | Platform | Full path of the key file |
 |---|---|

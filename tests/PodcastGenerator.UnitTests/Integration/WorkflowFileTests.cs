@@ -134,6 +134,38 @@ public sealed class WorkflowFileTests
         Assert.Contains("dotnet build -warnaserror -p:Version=", code, StringComparison.Ordinal);
     }
 
+    // AC-72: on any failure neither the tag nor the release exists. A cancelled run is not a failure, so the cleanup must name
+    // it, and it may remove only a tag this run created and only when the release was not published.
+    [Fact]
+    public void The_tag_cleanup_also_runs_when_the_run_is_cancelled_and_removes_only_a_tag_this_run_created()
+    {
+        var code = Code("release.yml");
+        var stepStart = code.IndexOf("- name: Remove the tag this run created", StringComparison.Ordinal);
+        Assert.True(stepStart > 0, "The tag cleanup step is missing.");
+        var step = code[stepStart..];
+        var condition = Regex.Match(step, @"(?m)^\s*if:\s*(?<condition>.+)$").Groups["condition"].Value;
+
+        Assert.Contains("failure()", condition, StringComparison.Ordinal);
+        Assert.Contains("cancelled()", condition, StringComparison.Ordinal);
+        Assert.Contains("steps.tag.outputs.created == 'true'", condition, StringComparison.Ordinal);
+        Assert.Contains("steps.release.outcome != 'success'", condition, StringComparison.Ordinal);
+        Assert.Contains("id: release", code, StringComparison.Ordinal);
+        Assert.Contains("git push origin --delete \"refs/tags/v${VERSION}\"", step, StringComparison.Ordinal);
+    }
+
+    // AC-69: the tag check must run before the "only ignored files changed" exit, so a malformed tag fails every run.
+    [Fact]
+    public void The_plan_step_checks_the_tags_before_it_decides_that_only_ignored_files_changed()
+    {
+        var code = Code("release.yml");
+
+        var compute = code.IndexOf("compute-release.sh", StringComparison.Ordinal);
+        var classify = code.IndexOf("classify-changes.sh", StringComparison.Ordinal);
+
+        Assert.True(compute > 0 && classify > 0);
+        Assert.True(compute < classify, "compute-release.sh (which checks the tags) must run before classify-changes.sh.");
+    }
+
     // AC-70, AC-74: the version reaches the build; assets have the documented names; notes and latest are set.
     [Fact]
     public void The_release_passes_the_version_to_the_build_and_publishes_the_two_named_assets_with_notes()

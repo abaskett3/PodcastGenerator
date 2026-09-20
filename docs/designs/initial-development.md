@@ -117,7 +117,7 @@ No call returned an error status: 135 of 135 answered HTTP 200 (so the retry rul
 - Provider limits (public `GET /api/v1/models/google/gemini-3.1-flash-tts-preview/endpoints`): `max_prompt_tokens` 8192,
   `max_completion_tokens` 16384, `context_length` 32768; Google's model page says the same (input 8,192, output 16,384
   tokens). At 25 audio tokens per second the output limit is about 10.9 minutes of audio per request.
-- Latency: about 5 s for 11 s of audio, 30 to 80 s for 1 to 4 minutes. The client timeout is 5 minutes.
+- Latency: about 5 s for 11 s of audio, 30 to 80 s for 1 to 4 minutes. Each attempt has a 5 minute limit that covers the body read (section 13, item 5).
 
 ### 4.2 Tags (U-1, U-6; AC-39)
 
@@ -323,7 +323,8 @@ runtime identifiers. The outputs are one 74.7 MB executable each (plus separate 
   pauses. Other parentheticals are narrated as written, including the guide's phonetic-spelling parentheses.
 - **D-9**: a pause is carried to the front of the next paragraph that has text, so it never ends a chunk; a pause with nothing
   after it is dropped; adjacent tags are merged into one bracket, comma separated.
-- **D-10**: only whole-line `[...]` cues are removed.
+- **D-10**: only whole-line `[...]` cues are removed. "Whole line" means the line is nothing but one or more bracketed cues and
+  spaces; words before, between or after cues make it a spoken line, narrated as written (section 13, item 2).
 - **D-11**: segments (`###` headings) are the first unit, paragraphs the second, sentences the last; a segment that fits is one
   unit; units are packed greedily up to the chunk size; the tail of a split segment is packed with the next segment; a
   paragraph over the chunk size is split at sentence ends (never inside a bracket) with a warning, and a single sentence over the
@@ -357,7 +358,7 @@ Files: `.github/workflows/pull-request.yml`, `pull-request-title.yml`, `release.
 
 **Ignore list and classification.** `classify-changes.sh` reads NUL-separated paths from `git diff --name-only -z --no-renames`
 and prints `code=false` only when every path is under `docs/`, `.docs/`, `.github/`, `.claude/`, `agent-memory/`, is the root
-`.gitignore`, or is a `.md` file at any depth (case-insensitive); zero paths give `code=true` (fail safe). `--no-renames` lists
+`.gitignore` (these names are matched case-sensitively, so `Docs/x.cs` is code), or is a `.md` file at any depth (the extension is matched in any case); zero paths give `code=true` (fail safe). `--no-renames` lists
 both sides of a rename, so moving code into an ignored folder still counts as code. It was run locally on 8 inputs (docs only,
 mixed, nested `.gitignore`, a `src/docs/` folder, empty input, a path with spaces, a look-alike folder, a `postman` file) with the
 expected result each time.
@@ -377,8 +378,9 @@ Pattern: `^[A-Za-z]+(\([^()]+\))?!?: [^[:space:]].*$`.
 **Release workflow** (AC-66 to AC-75). `on: push: branches: [main]`; `concurrency: {group: release, queue: max}` so releases run
 one at a time in order. Jobs:
 
-1. `Plan release`: check out with all tags; list the push's changed files (`before..sha`, or the pushed commit alone when the
-   before-commit is unknown) and classify; if code changed, `compute-release.sh` reads the squash subject and body and the
+1. `Plan release`: check out with all tags; run `compute-release.sh` first (it checks every `v*` tag, so a malformed tag fails the run
+   whether or not this merge releases, section 13, item 7); then list the push's changed files (`before..sha`, or the pushed commit alone when the
+   before-commit is unknown) and classify; if code changed and the script asked for a bump, the release goes ahead. The script reads the squash subject and body and the
    `v*` tags. It prints `bump=` and `version=`. It was run locally on 14 inputs: `feat` and `fix` with and without scope, `!`,
    a `BREAKING CHANGE:` footer on a `refactor`, `BREAKING-CHANGE:` with a bullet, uppercase `FEAT`, a non-conforming title with a
    footer (no release), `docs` and `chore` (no release), the first release (`1.0.0`, no bump), version ordering (`v1.9.9` <
@@ -391,7 +393,7 @@ one at a time in order. Jobs:
 4. `Publish release` (`permissions: contents: write`, only here): refuse if `v<version>` already exists on the remote (the run
    fails naming the tag; nothing is moved, deleted or overwritten); `git tag v<version> <sha>` and push it; `gh release create
    v<version> assets/* --verify-tag --title v<version> --generate-notes --latest`. If the release cannot be published the tag
-   this run created is deleted (`if: failure()`), so neither exists. The version is never stored in the repo and no branch is
+   this run created is deleted (`if: (failure() || cancelled())`, section 13, item 8), so neither exists. The version is never stored in the repo and no branch is
    pushed to (AC-71).
 
 Limits, honestly: the workflows could not be run here (no push, no `gh`). They were checked with a YAML parser, with actionlint
@@ -407,7 +409,8 @@ itself, unless an organization policy limits the token.
 
 ## 10. Tests (AC-5)
 
-242 xUnit tests in `tests/PodcastGenerator.UnitTests`; all fake the outside world: an in-memory `IFileSystem`, a fake speech
+314 xUnit tests written by the coding agent in `tests/PodcastGenerator.UnitTests` (242 in the first round, 72 added in fix round 1; the
+tester adds more under `Integration/`, see `docs/testing/initial-development.md`); all fake the outside world: an in-memory `IFileSystem`, a fake speech
 client, a fake `HttpMessageHandler` for the HTTP client, a fixed `TimeProvider`, a recording reporter, a fake delayer, and a
 fake key (`sk-test-SENTINEL-...`). No test reads the real key file or the real profile folders; the only real disk use is a
 temporary directory (MP3 files) that each test deletes, and repository files under `docs/` and `src/` read for the golden and
@@ -422,11 +425,12 @@ calls, `rate=24000; channels=1`; and the documented JSON error shape.
 | `EnvFileParserTests`, `ApiKeyProviderTests`, `RuntimePathsTests`, `RuntimeInitializerTests`, `StyleProviderTests` | key file rules and precedence, no `config.env`, runtime folder, default style equals section 9.1 and has no music content, style edits (AC-8, AC-22 to AC-27, AC-43, AC-44, AC-59) |
 | `OutputPathResolverTests` | default name and date, suffixes, file path, directory, extension check (AC-8 to AC-13) |
 | `PodcastGenerationServiceTests` | end to end with fakes: outputs, errors before any request, retries and back-off, `Retry-After`, non-retryable failures, redaction, cancellation, cleanup, progress, same style per chunk, 3,000 lines (AC-7 to AC-24, AC-40 to AC-52) |
-| `OpenRouterSpeechClientTests` | request shape, bearer header only, audio parsing, error classification, timeouts, cancellation, key never in messages (AC-3, AC-26, AC-40 to AC-42, AC-46) |
+| `OpenRouterSpeechClientTests` | request shape, bearer header only, audio parsing, error classification, timeouts including a body that stalls after the headers, cancellation, key never in messages, the registered 5 minute limit (AC-3, AC-26, AC-40 to AC-42, AC-46) |
 | `PhysicalFileSystemTests` | the real file system adapter in a temp folder: new file not overwritten, no-overwrite move, BOM read, environment variables, delayer |
 | `Mp3AudioWorkspaceTests` | decode the MP3: 2 channels, identical samples, order, duration within 100 ms, no silence added, bitrate, temp files deleted (AC-52, AC-53, D-14, D-15) |
 | `CommandLineTests`, `VersionInfoTests`, `CliRunnerTests`, `ConsoleRunReporterTests`, `CompositionTests` | arguments, `--help`, `--version`, exit codes, stdout and stderr use, key never printed, DI resolves (AC-4, AC-15 to AC-17, AC-26, AC-51) |
 | `ArchitectureTests` | project references, no `HttpClient` outside Infrastructure, `Async` and `CancellationToken` on every async method, no literal `%USERPROFILE%` or separator in `Path.Combine`, no key-shaped text in the repo, `.gitignore` has `*.env`, the Postman collection uses a variable (AC-2, AC-3, AC-4, AC-8, AC-27, AC-55) |
+| `RepositoryScanTests` | the scans in `ArchitectureTests` judge paths by segment: `.github`, `.gitignore`, `.gitattributes` are scanned, `bin`, `obj`, `.git`, `.claude` and every `.env`, `.env.*`, `*.env` file are not, whatever the clone path (AC-5, AC-8, AC-27) |
 
 ## 11. Acceptance criteria index
 
@@ -463,3 +467,69 @@ calls, `rate=24000; channels=1`; and the documented JSON error shape.
 - Directions other than `WHISPERED` use unverified tags (section 4.2).
 - The findings in section 2 need decisions.
 - `CLAUDE.md` "Gotchas" is now out of date (section 2, item 8).
+
+## 13. Fix round 1
+
+Inputs: `docs/reviews/initial-development-round-1.md`, `docs/bugs/initial-development-1.md`, `docs/testing/initial-development.md`.
+Each fix has a test that fails without it (checked by reverting the fix and running the test; see the last paragraph).
+
+1. **Missing-key message (AC-24, blocking).** `PodcastGenerationService.MissingKeyMessage` said `OPENROUTER_API_KEY=<your key>`. The spec
+   (AC-24 and the error table) and `CLAUDE.md` "Usage" give the line as `OPENROUTER_API_KEY=<key>`. The message now contains exactly that
+   text followed by "(where <key> is your OpenRouter API key)". The unit test asserted only the prefix `OPENROUTER_API_KEY=<`, and the
+   tester's integration test rewrote `<your key>` to `<key>` before asserting; both now assert the exact text on the message as printed.
+   The README example is aligned.
+2. **Cues on a spoken line (tester bug 1, AC-34, AC-36).** `CueRegex` was `^\[.*\]$`, which matched any line that starts with `[` and ends
+   with `]`. It is now "one or more bracket groups separated by spaces and nothing else", where a group may hold one level of nested
+   brackets (so `[SFX: DOOR [SLAM]]` is still removed, as before). `[SFX: DOOR] and then he spoke [SFX: DOOR]` is a spoken line and is
+   narrated as written, cues included, like the existing D-10 rule for a bracket inside a spoken line. The alternatives inside the group are
+   mutually exclusive on their first character, so the expression cannot backtrack badly.
+3. **Scan filters (review finding 2) and 4. key files (review finding 3).** `Path.Combine("", ".git", "")` returns `.git`, not `\.git\` (run and checked: it prints `.git`, and `bin` for the other call),
+   so the old filters were substring tests. The scan logic moved to `tests/.../Support/RepositoryScan.cs`. It works on the path relative to
+   the repository root, split into segments: a file is skipped when a segment is `bin`, `obj`, `.git` or `.claude`, or when its name is
+   `.env`, starts with `.env.` or ends with `.env`. Only the root's own files and `src`, `tests`, `docs`, `postman` and `.github` are
+   listed (every tracked top-level entry is one of these or `.claude`), so `.claude/` and `.git/` are not walked and no key file is
+   opened. `.github/`, `.gitignore` and `.gitattributes` are now scanned, which the old filter skipped by accident. The AC-8 and AC-27
+   tests keep their meaning: AC-8 still reads every `.cs` file under `src`, AC-27 still looks for key-shaped text in every source,
+   document, workflow, script and collection file. `RepositoryScanTests` checks the rule on sample paths (including `src/robin/`,
+   `src/binder/` and `tests/objective/`, which the old substring test dropped) and checks that the scans of the real repository are not
+   empty and list no key file.
+5. **Timeout over the body read (review finding 4).** Checked by a probe test (removed afterwards): a `StreamContent` whose stream never
+   yields, a real `HttpClient` with `Timeout = 300 ms`, `SendAsync(..., ResponseHeadersRead)` returned, and `ReadAsByteArrayAsync` was
+   still pending 2 s later. So `HttpClient.Timeout` does not cover the body read here. `OpenRouterSpeechClient` now takes a
+   `SpeechClientOptions(RequestTimeout)` (registered in DI as 5 minutes, the value the design already used), creates a linked
+   `CancellationTokenSource` with `CancelAfter` per attempt, and uses its token for the send, the error-body read and the audio-body
+   read. When that token fires and the caller's token has not, the existing catch turns it into `SpeechException("The request timed
+   out.")` with `IsTransient = true`, so the D-12 retry path runs. `HttpClient.Timeout` is set to infinite in DI so there is one clock.
+   Tests: a body that stalls after a 200, an error status whose body stalls, caller cancellation while reading (still an
+   `OperationCanceledException`, not a `SpeechException`), a normal body under the limit, and the registered values. The stall tests
+   use `WaitAsync(30 s)` so a missing limit fails the test instead of hanging it.
+6. **Ignore list case (review finding 7).** `classify-changes.sh` no longer sets `nocasematch`. The directory names and `.gitignore` are
+   matched exactly; the `.md` extension is matched as `*.[mM][dD]`. `CLAUDE.md` says "any `.md` file" and the design chose any case;
+   the directories are case-sensitive because Linux file names are (`CLAUDE.md` "Gotchas"). Tests: `Docs/Program.cs`, `DOCS/x.cs`,
+   `.GitHub/...`, `.Docs/...`, `.Claude/...`, `Agent-Memory/...`, `.Gitignore` are code; `README.MD`, `docs/Notes.Md`, `x/y.mD`,
+   `Docs/Program.md` are ignored.
+7. **Malformed `v*` tag (review finding 8, AC-69).** AC-69 reads: "A `v*` tag that is not `vMAJOR.MINOR.PATCH` fails the workflow with a
+   message naming the tag." The sentence has no condition, so the check must not depend on the merge releasing. `compute-release.sh` now
+   validates every tag before the `bump=none` exit, and the release workflow runs the script before it classifies the changed files, so
+   a malformed tag also fails a docs-only merge. Cost: while such a tag exists every push to `main` fails the `Plan release` job until
+   the tag is fixed or deleted; the message says so. If the user reads AC-69 as "only when releasing", revert this item (the script
+   change is moving three lines, the workflow change is moving one block).
+8. **Tag cleanup on cancel (tester finding 2, AC-72).** The cleanup step's condition is now
+   `(failure() || cancelled()) && steps.tag.outputs.created == 'true' && steps.release.outcome != 'success'`. `created` is written only
+   after this run's `git push` of the tag succeeded, so a tag another run made is never removed, and the last clause keeps a published
+   release's tag if the run is cancelled after the release step finished. `failure()` and `cancelled()` are GitHub's status-check
+   functions (https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions; I could not open the
+   page from this environment, the names are from memory of that page, and the YAML was parsed with PyYAML). Known gap, not fixed: if the
+   run is cancelled or fails while `gh release create` is uploading, gh may leave a draft release (the workflow comment says gh creates a
+   draft and publishes it at the end). The cleanup removes the tag but not a draft; deleting a draft by tag is not reliable
+   (the tag lookup does not return drafts, from memory of the GitHub REST docs), so I did not add it. A person deletes such a draft by
+   hand. The workflows have still never run on GitHub.
+
+Verification that each test fails without its fix: the two parser tests, the two missing-key tests, the ignore-list and tag tests, the
+two workflow file tests and the release script tests failed when the corresponding source files were restored to the previous commit, and
+the two stalled-body client tests failed (after the 30 s `WaitAsync`) when the client used the caller's token again. The scan tests
+exercise the new helper, so they have no old version to run; their sample paths are the ones the review named.
+
+Not changed, as instructed: D-12 (402 with `Retry-After` is retried), D-4, `concurrency: {group: release, queue: max}`, the emphasis, pause
+and `(WHISPERED)` tags, chunk size 1500, no silence between chunks, the LGPL-3.0 encoder, the duration check, small final chunks and the
+`CLAUDE.md` Gotchas line.

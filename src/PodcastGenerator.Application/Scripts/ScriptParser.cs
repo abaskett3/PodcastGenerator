@@ -21,8 +21,10 @@ public sealed partial class ScriptParser : IScriptParser
     [GeneratedRegex(@"^#{2,6}(\s|$)")]
     private static partial Regex SceneOrSegmentHeadingRegex();
 
-    // A whole-line cue: "[SFX: ...]", "[MUSIC: ...]", "[FADE OUT]".
-    [GeneratedRegex(@"^\[.*\]$")]
+    // A line made only of cues: "[SFX: ...]", "[MUSIC: ...]", "[FADE OUT]", or several of them separated by spaces (AC-34).
+    // A cue is a bracket group that may hold one level of nested brackets. Words between or after cues make the line a
+    // spoken line, so "[SFX: DOOR] and then he spoke [SFX: DOOR]" is not removed (AC-36).
+    [GeneratedRegex(@"^\[(?:[^\[\]]|\[[^\[\]]*\])*\](?:\s*\[(?:[^\[\]]|\[[^\[\]]*\])*\])*$")]
     private static partial Regex CueRegex();
 
     // "(BEAT)" or "(PAUSE - 3 SECONDS)" on a line of its own (D-8).
