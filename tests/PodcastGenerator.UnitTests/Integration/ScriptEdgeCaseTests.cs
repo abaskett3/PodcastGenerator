@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using PodcastGenerator.Application.Scripts;
+
 namespace PodcastGenerator.UnitTests.Integration;
 
 /// <summary>Regression tests for script lines at the edge of the format rules, run through the whole pipeline and read off the
@@ -67,5 +70,57 @@ public sealed class ScriptEdgeCaseTests : IDisposable
         Assert.Equal("Good evening to you.", paragraphs[1]);
         Assert.Matches(@"^\[[^\[\]]+\] Shh\.$", paragraphs[2]);
         Assert.Equal("Umbriel", Assert.Single(_pipeline.Http.Requests).Json.GetProperty("voice").GetString());
+    }
+
+    // AC-34: every cue form shown in docs/script-writing-guide.md is removed, alone on its line.
+    [Theory]
+    [InlineData("[MUSIC: THEME – DESCRIPTION OF THE SOUND (FADE UP, THEN UNDER)]")]
+    [InlineData("[SFX: STATIC - FADE OUT]")]
+    [InlineData("[MUSIC: LOW, OMINOUS (UNDER)]")]
+    [InlineData("[FADE OUT]")]
+    [InlineData("[SFX: WHAT THE LISTENER HEARS]")]
+    [InlineData("[SFX: PHONE [RINGS] TWICE]")]
+    public async Task Every_cue_form_of_the_script_guide_is_removed(string cue)
+    {
+        var transcript = await TranscriptOfAsync($"CECIL: One.\n\n{cue}\n\nCECIL: Two.\n");
+
+        Assert.Equal("One.\n\nTwo.", transcript);
+    }
+
+    // AC-36: words before, after or between cues are narrated as written, and nothing else on the line is lost.
+    [Theory]
+    [InlineData("[SFX: DOOR] Hello there.", "[SFX: DOOR] Hello there.")]
+    [InlineData("Hello there. [SFX: DOOR]", "Hello there. [SFX: DOOR]")]
+    [InlineData("[SFX: DOOR] [MUSIC: STING] and words", "[SFX: DOOR] [MUSIC: STING] and words")]
+    [InlineData("[SFX: DOOR] words [MUSIC: STING] more words [FADE OUT]", "[SFX: DOOR] words [MUSIC: STING] more words [FADE OUT]")]
+    public async Task A_line_with_words_and_cues_is_narrated_as_written(string line, string expected)
+    {
+        var transcript = await TranscriptOfAsync($"CECIL: One.\n\n{line}\n");
+
+        Assert.Equal($"One.\n\n{expected}", transcript);
+    }
+
+    // The cue pattern must not take a long time on a long line that is not a cue (it is applied to every line of a script).
+    [Fact]
+    public void The_cue_check_is_fast_on_very_long_lines_that_are_not_cues()
+    {
+        var parser = new ScriptParser();
+        var inputs = new[]
+        {
+            "[" + new string('a', 200_000),
+            string.Concat(Enumerable.Repeat("[a] ", 50_000)) + "words",
+            "[" + string.Concat(Enumerable.Repeat("[a", 50_000)),
+            string.Concat(Enumerable.Repeat("[", 50_000)),
+        };
+
+        foreach (var input in inputs)
+        {
+            var clock = Stopwatch.StartNew();
+            var script = parser.Parse("CECIL: One.\n\n" + input + "\n");
+            clock.Stop();
+
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5), $"Parsing a {input.Length} character line took {clock.Elapsed}.");
+            Assert.True(script.HasSpeech);
+        }
     }
 }

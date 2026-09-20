@@ -248,6 +248,62 @@ public sealed class FailureAndRetryTests : IDisposable
         AssertNothingLeftBehind(_pipeline.DefaultOutputDirectory);
     }
 
+    // D-12 ("network errors, timeouts"), through the real HttpClient pipeline: the headers arrive but the audio body stalls.
+    // HttpClient.Timeout does not cover that read, so the run would wait forever without the client's own time limit.
+    [Fact]
+    public async Task A_body_that_stalls_after_the_headers_is_retried_as_a_timeout_and_the_run_then_succeeds()
+    {
+        _pipeline.SpeechTimeout = TimeSpan.FromMilliseconds(300);
+        _pipeline.Http.Responder = request => request.Number == 1 ? CannedSpeechHandler.StalledBody() : Ok();
+
+        var exitCode = await _pipeline.RunAsync(OneLineScript()).WaitAsync(TimeSpan.FromSeconds(60));
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(2, _pipeline.Http.Requests.Count);
+        Assert.Single(_pipeline.Delayer.Delays);
+        Assert.True(File.Exists(_pipeline.DefaultOutputPath));
+    }
+
+    [Fact]
+    public async Task A_body_that_always_stalls_fails_the_run_after_five_retries_with_a_timeout_message_and_leaves_nothing_behind()
+    {
+        _pipeline.SpeechTimeout = TimeSpan.FromMilliseconds(200);
+        _pipeline.Http.Responder = _ => CannedSpeechHandler.StalledBody();
+
+        var exitCode = await _pipeline.RunAsync(OneLineScript()).WaitAsync(TimeSpan.FromSeconds(60));
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(6, _pipeline.Http.Requests.Count);
+        var error = _pipeline.Err.ToString();
+        Assert.Contains("chunk 1 of 1", error, StringComparison.Ordinal);
+        Assert.Contains("timed out", error, StringComparison.OrdinalIgnoreCase);
+        AssertNothingLeftBehind(_pipeline.DefaultOutputDirectory);
+    }
+
+    // AC-42: Ctrl+C while the audio body is being read is a cancellation, not a timeout to retry.
+    [Fact]
+    public async Task Cancelling_while_the_audio_body_is_being_read_stops_the_run_without_a_retry()
+    {
+        using var cancellation = new CancellationTokenSource();
+        _pipeline.Http.Responder = request =>
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(200);
+                await cancellation.CancelAsync();
+            });
+            return CannedSpeechHandler.StalledBody();
+        };
+
+        var exitCode = await _pipeline.RunAsync(OneLineScript(), cancellationToken: cancellation.Token).WaitAsync(TimeSpan.FromSeconds(60));
+
+        Assert.Equal(1, exitCode);
+        Assert.Single(_pipeline.Http.Requests);
+        Assert.Empty(_pipeline.Delayer.Delays);
+        Assert.Contains("cancel", _pipeline.Err.ToString(), StringComparison.OrdinalIgnoreCase);
+        AssertNothingLeftBehind(_pipeline.DefaultOutputDirectory);
+    }
+
     // AC-14: a failure while encoding (a directory where the output must go is not possible; use an unwritable name) is
     // covered by the unit tests; here the real encoder runs and its temporary file is moved, not left.
     [Fact]

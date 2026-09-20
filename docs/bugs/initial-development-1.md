@@ -1,5 +1,7 @@
 # Bug: spoken words between two square-bracket cues on one line are dropped
 
+- **Status: fixed at `b376719` (round 2).** The test below passes there and fails on `5413ba3`. `CueRegex` now matches only lines made
+  of bracket groups and spaces; the tests stay as regression tests.
 - Slug: `initial-development`, round 1, CODE_HEAD `5413ba3`
 - Behavior affected: **AC-34** ("A line consisting only of a square-bracket cue ... is removed") and **AC-36** ("The tool
   adds, removes or rewords no word of the script beyond AC-28 to AC-35 ... a script that departs from the guide still runs").

@@ -81,6 +81,50 @@ internal sealed class CannedSpeechHandler : HttpMessageHandler
         return response;
     }
 
+    /// <summary>A 200 whose headers arrive at once and whose audio body never finishes: the connection stalls after the headers.
+    /// Only cancellation ends a read of it.</summary>
+    public static HttpResponseMessage StalledBody()
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StalledStream()) };
+        response.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("audio/pcm; rate=24000; channels=1");
+        return response;
+    }
+
+    private sealed class StalledStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            return 0;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException("Only ReadAsync is expected.");
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -232,6 +276,9 @@ internal sealed class Pipeline : IDisposable
 
     public TimeProvider Clock { get; set; }
 
+    /// <summary>The longest one speech attempt may take; tests that stall a response make it short.</summary>
+    public TimeSpan SpeechTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
     public CannedSpeechHandler Http { get; } = new();
 
     public FakeEnvironmentVariables Environment { get; } = new();
@@ -297,6 +344,7 @@ internal sealed class Pipeline : IDisposable
         services.AddSingleton<IDelayer>(Delayer);
         services.AddSingleton<IAudioWorkspaceFactory>(Workspaces);
         services.AddSingleton(Clock);
+        services.AddSingleton(new SpeechClientOptions(SpeechTimeout));
         services.AddHttpClient<ISpeechClient, OpenRouterSpeechClient>().ConfigurePrimaryHttpMessageHandler(() => Http);
         services.AddSingleton<IRunReporter>(new ConsoleRunReporter(Err));
         services.AddSingleton<CliRunner>();
