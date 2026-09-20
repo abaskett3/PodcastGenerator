@@ -1,0 +1,223 @@
+# WELCOME TO VAST NIGHT VALE
+
+PROGRAMME: Welcome to Vast Night Vale
+
+EPISODE: RC 09-17-26 Feature Release Broadcast
+
+STYLE: A podcast script in the style of Welcome to Night Vale
+
+CAST: CECIL PALMER (host)
+
+## SCENE 1 – INT. RADIO STUDIO – EVENING
+
+### SEGMENT 1 – OPENING
+
+[MUSIC: THEME – EERIE, MINOR-KEY ATMOSPHERIC MUSIC WITH WHISPERED STRINGS (FADE UP, THEN UNDER)]
+
+CECIL: Good evening, Night Vale. I'm Cecil Palmer.
+
+And what a curious evening it is. The sky above our fair city is that particular shade of purple. It's the shade it gets when something important is about to happen. Or perhaps when it has already happened, and we're only now finding out. It's hard to say. Time has always been more of a suggestion than a rule in Night Vale.
+
+I'm here to tell you about eight independent changes that have begun their quiet arrival into your world. Eight pieces of a puzzle we're not entirely sure we're meant to understand. But understand them we shall attempt.
+
+[SFX: SOFT RADIO STATIC]
+
+### SEGMENT 2 – INSTANCE LOGS
+
+CECIL: First, a notice about logs. Not the wooden kind that sometimes walk through the desert of their own accord. You all know about those. No, I'm speaking of something far more insidious. *Instance logs*.
+
+For months now, the endpoints where hosts request their instance logs operated under a dangerous assumption. Or perhaps it was minutes. It's difficult to know. The client, you see, could name its own storage key. Imagine the implications. One caller could construct a request—just a simple, innocent request—and read another instance's logs. Or worse. Overwrite them entirely.
+
+[MUSIC: LOW, OMINOUS (UNDER)]
+
+CECIL: (CONT'D) We have corrected this.
+
+The server now mints a single-use token. Bounded. Fleeting. Each token exists for exactly ten minutes. It lives in Redis, where all temporary things live. It is consumed the moment it is used. The old I-D parameter? It no longer exists in any meaningful sense. Rejected at the schema layer. It cannot be reached. It is no longer even possible.
+
+And the body size—ah, the body size is now capped. Fixed. Known. Enforced before anything else is examined. Even before the token is checked. Particularly before invalid JSON is attempted.
+
+The real host daemon receives the token. It executes. It posts the log body back. The server stores it. And the original caller receives a U-R-L to their public-read S-three object.
+
+Repeat requests each mint an independent token. Each correctly refreshes the stored object.
+
+We note this strange behavior. If the host is offline when you request your logs, there will be no log object. Not until the host catches up. We mention this not because it is broken, but because it exists. We acknowledge it. We move forward.
+
+[SFX: STATIC - FADE OUT]
+
+### SEGMENT 3 – PREPAID RESERVATION DISCOUNT MATH
+
+CECIL: Now. Let us speak of something that troubles the accountants.
+
+*Prepaid reservation discount math*.
+
+[SFX: TYPEWRITER, SLOW AND DELIBERATE]
+
+CECIL: (CONT'D) A host prepays for a reserved instance. The system was supposed to credit exactly the term implied by the deposit and the account's discount curve. It was supposed to.
+
+But two bugs—oh, two insidious bugs—undermined this sacred compact. The first: the term-to-months conversion used the wrong shape of the discount curve. A six-month prepayment, should you have made one, landed not as six months of credit but as three-point-two-two months. Three. Point. Two. Two. The math itself had become a lie.
+
+The second: the pricing basis didn't match. The deposit was sized against one number, but the machine's full on-demand rate—G-P-U *and* storage—was another. They disagreed.
+
+We have corrected this.
+
+The term and discount-rate relationship has been fixed. The discount rate now scales properly across the account's full range. A six-month deposit at a high discount ceiling now credits six months. Not three-point-two-two. Six.
+
+And the pricing now consistently uses the machine's full on-demand rate.
+
+But there is more.
+
+Previously unhandled failure paths have been given explicit, typed rejections. No more silent misbehavior. No more raw crashes. Now we have three.
+
+First, "deposit exceeds max term." The deposit is too large for the model. Four hundred.
+
+Second, "rental too long." The deposit fits, but exceeds the contract's remaining window. It now returns the timescale and the window months, so the client can understand what remains.
+
+Third, "pricing unavailable." This was an unhandled crash. Against a soft-deleted machine, perhaps. Now it returns a clean error.
+
+And a destroy racing an in-flight prepay? It completes cleanly. It returns "no such instance." Never a charge with no audit record. Never a charge hanging in the void.
+
+One final note, and this is important. Topping up an existing reservation balance now reprices the *entire* balance at the new blended rate. Not just the new increment. The support team should expect questions.
+
+[SFX: CASH REGISTER, PLAYED BACKWARDS]
+
+### SEGMENT 4 – MACHINE NOTICE NOTIFICATION SYSTEM
+
+CECIL: A new system has been installed. The Machine Notice Notification System.
+
+[SFX: DISTANT BELLS TOLLING]
+
+CECIL: (CONT'D) Admins and support staff can now post a notice against one or more of a host's machines. The host is notified. Batched. Not one email per notice—a single email containing every machine and every notice.
+
+Notices posted for the same host within a rolling one-hour window merge into a single open batch. Should you edit a notice—should you remove it—that batch updates. If it was the batch's only notice, the pending email is cancelled entirely.
+
+At most one open batch per host. This is the design. This is intentional. There is no per-host opt-out in the console.
+
+Delivery is currently limited to admins and accounts on the vast dot A-I domain. A switch exists—an admin-only switch—to extend delivery to all hosts. But know this: it is global. No per-environment scoping. Flip it in one place and it affects all the places that share the backing store.
+
+In other words, beloved listeners, the notification system knows where you live.
+
+(BEAT)
+
+### SEGMENT 5 – MAINTENANCE WINDOWS
+
+CECIL: The next change concerns *maintenance windows*.
+
+Support and admin sometimes need to schedule maintenance on a host's machine. A planned intervention. Something that cannot be interrupted or cancelled. Previously, a host could cancel any maintenance window through the normal host-facing endpoints, regardless of who created it.
+
+This is no longer true.
+
+Maintenance windows now record their creator. Host-created windows remain cancellable by the host who created them. But windows created by an admin? They are locked. Rejected with an explicit message: "admin-locked."
+
+This message appears on every host-facing cancel path. Even the bulk cancel endpoint. The batch cancels any *host-created* windows while skipping the admin-locked ones. A new endpoint exists for admins only—to cancel any window, including the admin-created ones.
+
+And the host-facing maintenance listing now exposes a flag called "admin scheduled." True or false. No revelation of who created it.
+
+One thing we must tell you. The console U-I doesn't surface this yet. The rejection message. The flag. Not yet. This feature lives only in the A-P-I. In the C-L-I. In the places between the places.
+
+[SFX: MAINTENANCE ALERT BEEPING IN DISTANCE]
+
+### SEGMENT 6 – BINARY COLUMNS
+
+CECIL: A brief note regarding binary columns.
+
+[SFX: COMPUTER WHIRRING]
+
+CECIL: (CONT'D) Any admin-tooling endpoint that tried to serialize a binary database column to JSON would crash. Crash with a five-hundred error. The query succeeded. But the serialization? It died.
+
+Most visibly, this happened in admin data—the internal table browser where admins examine production data.
+
+The shared JSON renderer now knows how to serialize binary values. Valid U-T-F-eight content decodes to a plain string. Non-U-T-F-eight content—true binary—falls back to a lowercase hex string. Empty binary values serialize as an empty string.
+
+This infrastructure fix applies everywhere. Every endpoint that uses the JSON renderer.
+
+Companion note: admin data now reads from the read replica instead of the primary. This reduces load from ad-hoc admin queries. One code path—table reflection during autoload—does not yet have the primary-fallback safety net. If the replica is unreachable, it may fail.
+
+We flag this for verification. Neither confirmed broken nor confirmed fine.
+
+[SFX: DATABASE HUM, STEADY AND ETERNAL]
+
+### SEGMENT 7 – MY-OFFERS HOST METRICS ENDPOINT
+
+CECIL: A new metric appears on the horizon.
+
+The My-Offers Host Metrics Endpoint.
+
+[SFX: STATISTICAL DATA VISUALIZING AS SOFT, CRYSTALLINE SOUNDS]
+
+CECIL: (CONT'D) A new read-only endpoint now exists, under metrics, G-P-U, my-offers, in the version-zero A-P-I.
+
+A host can use this to see how their live G-P-U offers compare to the broader market. Percentile figures. Median pricing. Per G-P-U model and size.
+
+If a host's specific combination has fewer than ten peer offers, the comparison falls back to a broader pool. All sizes of that G-P-U model.
+
+Results are cached for 60 seconds. The endpoint is cheap to poll.
+
+Host accounts with no active machines still receive a valid response. Zeros across the board. But a plain renter account? They are rejected outright.
+
+We must tell you: this endpoint has no C-L-I consumer yet. No console tab. Not yet. It is A-P-I only. A capability waiting for the tools to wield it.
+
+[SFX: MARKET TICKER, PRICES TICKING UPWARD AND DOWNWARD]
+
+### SEGMENT 8 – REFERRAL COUNTS
+
+CECIL: The referral question has troubled this city for some time.
+
+And we are pleased to announce that certain inconsistencies have been resolved.
+
+[MUSIC: SOFT, MYSTERIOUS HARP (UNDER)]
+
+CECIL: (CONT'D) The query that counts a user's referrals over a date range was grouping by a floating-point day value. Do you understand what this means? It means two referrals could land on the same U-T-C day. Same day. At different times. And be counted as two separate rows.
+
+And the query's upper date bound? It was wrong. It excluded almost the entirety of the last day in any requested range.
+
+Both of these errors have been corrected.
+
+Referral counts are now grouped by an integer U-T-C day. The upper bound is now inclusive of the full end day. A Python workaround had been silently correcting one of the two affected endpoints. It has been removed. The underlying query is now correct.
+
+A supporting database index was added to keep the corrected query fast at scale. Both referral-count queries now read from the replica rather than the primary.
+
+We note: this affects referral *counts* only. The referral earnings dollar amount is populated by an unrelated billing pathway. That remains untouched.
+
+The console's earnings dashboard currently surfaces an all-time referral count. Not a per-day breakdown. So this fix, for now, is A-P-I-only visibility.
+
+(BEAT)
+
+[SFX: COINS DROPPING INTO A WELL, DEEP AND DISTANT]
+
+### SEGMENT 9 – SELF-TEST READINESS
+
+CECIL: And finally, a matter of readiness.
+
+A new endpoint, called self-test readiness, now exists for each machine, by machine I-D.
+
+[SFX: MACHINE DIAGNOSTIC SOUNDS, GENTLE BEEPING]
+
+CECIL: (CONT'D) This endpoint tells a host—or an admin—whether a machine's kernel or NVIDIA driver version is problematic. Whether an update is needed before running a self-test.
+
+It does not expose the underlying rule thresholds. The matching logic remains hidden. Only the advisory is revealed.
+
+Access is owner-or-admin. The machine's owner is always allowed. An admin who isn't the owner is allowed only from an I-P on the admin whitelist.
+
+A pre-merge ordering bug was corrected. Machine ownership is now evaluated before the admin whitelist branch. An admin who also owns the machine is correctly let in from any network. Ownership is sufficient.
+
+And like the metrics endpoint before it, this one has no C-L-I consumer yet. The vast C-L-I command is referenced in the merge commit as a follow-on. For now, it lives in the A-P-I.
+
+[SFX: MACHINE SHUTDOWN SEQUENCE]
+
+### SEGMENT 10 – CLOSING
+
+CECIL: Eight changes. Eight pieces. Eight ways in which your world has shifted—barely perceptibly—into something new.
+
+None of these touch billing. None of these touch payment. Stripe remains distant, unmolested, as it should be.
+
+We encourage you, dear listeners, to examine these changes at the A-P-I level. The C-L-I level. The level where truth reveals itself to those who know how to ask.
+
+This has been the Night Vale Technical Update. I'm Cecil Palmer. Stay tuned. Stay safe. And remember: the most dangerous things are often the ones that work exactly as intended.
+
+[MUSIC: THEME – EERIE, SWELLS, FADES TO GENTLE STATIC (FADE UNDER)]
+
+CECIL: (WHISPERED) The sky is turning that shade of purple again.
+
+[FADE OUT]
+
+END

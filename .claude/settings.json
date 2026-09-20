@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./config.env)",
+      "Read(~/.config/PodcastGenerator/PodcastGenerator.env)",
+      "Bash(cat *config.env*)",
+      "Bash(cat *PodcastGenerator.env*)",
+      "Bash(type *config.env*)",
+      "Bash(type *PodcastGenerator.env*)",
+      "PowerShell(Get-Content *config.env*)",
+      "PowerShell(Get-Content *PodcastGenerator.env*)"
+    ]
+  },
+  "enabledPlugins": {
+    "csharp-lsp@claude-plugins-official": true,
+    "github@claude-plugins-official": true,
+    "code-review@claude-plugins-official": true,
+    "microsoft-docs@claude-plugins-official": true
+  }
+}
