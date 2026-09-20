@@ -1,7 +1,7 @@
 ---
 name: deliver
-description: Run the full delivery pipeline for a PodcastGenerator feature or bug fix - product-manager writes the spec, coding-agent implements, testing-agent and code-review-agent verify in parallel, project-manager opens the GitHub PR. Invoke as /deliver <feature description> or /deliver bug #<issue number> or /deliver bug <description>.
-argument-hint: <feature description> | bug #<issue> | bug <description>
+description: Run the full delivery pipeline for a PodcastGenerator feature or bug fix - product-manager writes the spec, coding-agent implements, testing-agent and code-review-agent verify in parallel, project-manager opens the GitHub PR. Invoke as /deliver <feature description>, /deliver #<issue number> (a GitHub issue labeled enhancement), /deliver bug #<issue number> or /deliver bug <description>.
+argument-hint: <feature description> | #<issue> | bug #<issue> | bug <description>
 disable-model-invocation: true
 ---
 
@@ -25,17 +25,22 @@ Run these and stop with the exact failure if any fails. Do not try to fix repo s
 - If the arguments start with `bug`, it is a **bug**; otherwise a **feature**.
 - If the arguments reference a GitHub issue (`#<n>`), record `ISSUE=<n>` for either kind of run and pass it to
   `coding-agent`, `testing-agent` and `project-manager` so their commits and the PR carry GitHub closing keywords
-  (`Closes #<n>`). For a feature with an issue, read it with `gh issue view <n> --json number,title,body,labels` and use
-  it as the feature description. No issue number means no keyword; never make one up.
+  (`Closes #<n>`). No issue number means no keyword; never make one up.
+- A feature with an issue (`#<n>` or `feature #<n>`) is a request from a GitHub issue. Read it with
+  `gh issue view <n> --json number,title,body,labels,comments,state`. It must be open and carry the `enhancement`
+  label. If it is closed, or has no `enhancement` label, stop and tell the user; if it has the `bug` label, suggest
+  `/deliver bug #<n>` instead. Do not relabel or edit the issue.
 - If the arguments name a GitHub project, record it as `PROJECT` and pass it to `project-manager` only.
 - Pick `<slug>`: kebab-case, at most 5 words. For a bug with an issue number, `issue-<n>-<short-title>`; a bug
   without one, `bug-<short-title>`.
 
 ## 2. Intake
 
-- **Feature**: launch `product-manager` with the description and `<slug>`. When it returns, read
-  `docs/specs/<slug>.md`. If it lists `BLOCKING` open questions, ask the user (AskUserQuestion) and give the answers
-  to the product-manager again to update the spec before continuing.
+- **Feature**: launch `product-manager` with the description and `<slug>`. For a feature from a GitHub issue, pass
+  the whole `gh issue view` result (number, title, labels, body, comments) in place of the description; the
+  product-manager has no `gh` access. When it returns, read `docs/specs/<slug>.md`. If it lists `BLOCKING` open
+  questions, ask the user (AskUserQuestion) and give the answers to the product-manager again to update the spec
+  before continuing. Questions are for the user only; never post them to the issue.
 - **Bug with issue number**: `gh issue view <n> --json number,title,body,labels` and write the result as markdown to
   `docs/bugs/<slug>.md` (title, labels, body, issue number). No product-manager step.
 - **Bug from text**: write the text to `docs/bugs/<slug>.md`. No product-manager step.
