@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using PodcastGenerator.Application;
 using PodcastGenerator.Application.Abstractions;
 using PodcastGenerator.Application.Generation;
+using PodcastGenerator.Application.Runtime;
 using PodcastGenerator.Cli;
 using PodcastGenerator.Infrastructure;
 using PodcastGenerator.Infrastructure.Speech;
@@ -117,6 +118,14 @@ public class VersionInfoTests
 
 public class CliRunnerTests
 {
+    /// <summary>A config step that finds everything present, so these tests are about the generation result only.</summary>
+    private sealed class NoopConfigService : IConfigService
+    {
+        public Task SetAsync(string key, string value, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task EnsureRequiredAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
     private sealed class StubService : IPodcastGenerationService
     {
         public Func<GenerationRequest, CancellationToken, Task<GenerationResult>> Behavior { get; set; } =
@@ -135,7 +144,7 @@ public class CliRunnerTests
     {
         var stdout = new StringWriter();
         var stderr = new StringWriter();
-        var code = await new CliRunner(service).RunAsync(new RunCommand(script, output), stdout, stderr, CancellationToken.None);
+        var code = await new CliRunner(service, new NoopConfigService()).RunAsync(new RunCommand(script, output), stdout, stderr, CancellationToken.None);
         return (code, stdout.ToString(), stderr.ToString());
     }
 
@@ -201,7 +210,7 @@ public class CliRunnerTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var code = await new CliRunner(fixture.CreateService()).RunAsync(new RunCommand(fixture.ScriptPath, null), stdout, stderr, CancellationToken.None);
+        var code = await fixture.CreateRunner().RunAsync(new RunCommand(fixture.ScriptPath, null), stdout, stderr, CancellationToken.None);
 
         Assert.Equal(1, code);
         Assert.DoesNotContain(TestKeys.Sentinel, stdout.ToString());
@@ -215,7 +224,7 @@ public class CliRunnerTests
         var fixture = new ServiceFixture();
         var stdout = new StringWriter();
 
-        var code = await new CliRunner(fixture.CreateService()).RunAsync(new RunCommand(fixture.ScriptPath, null), stdout, new StringWriter(), CancellationToken.None);
+        var code = await fixture.CreateRunner().RunAsync(new RunCommand(fixture.ScriptPath, null), stdout, new StringWriter(), CancellationToken.None);
 
         Assert.Equal(0, code);
         Assert.Equal(fixture.DefaultOutputPath + Environment.NewLine, stdout.ToString());
@@ -252,6 +261,7 @@ public class CompositionTests
         services.AddPodcastGeneratorApplication();
         services.AddPodcastGeneratorInfrastructure();
         services.AddSingleton<IRunReporter, ConsoleRunReporter>();
+        services.AddSingleton<IConfigPrompter, ConsoleConfigPrompter>();
         services.AddSingleton<CliRunner>();
 
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });

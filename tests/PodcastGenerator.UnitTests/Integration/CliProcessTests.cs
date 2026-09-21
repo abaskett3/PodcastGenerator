@@ -1,35 +1,21 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
 using PodcastGenerator.Cli;
 using PodcastGenerator.UnitTests.Support;
 
 namespace PodcastGenerator.UnitTests.Integration;
 
 /// <summary>Starts the real built <c>PodcastGenerator.dll</c> (the top-level <c>Program</c>) as a process and checks its exit
-/// code and its standard output and error (AC-15, AC-16, AC-17, AC-13, AC-18 to AC-20).
+/// code and its standard output and error (AC-15, AC-16, AC-17, and cli-set-config AC-4).
 ///
-/// Only failure paths that end before the tool touches the runtime folder or the key are used here. A valid script would make
-/// the process read the real user's profile and key file and call the real API, which no test may do (AC-5). As a second
-/// guard the child process gets no <c>OPENROUTER_API_KEY</c> and a proxy that points at a closed local port, so an
+/// Only paths that end before the tool touches the runtime folder or the key are used here: usage errors, help, version and a
+/// rejected <c>--set-config</c>. Any other command line makes the process check the config folder and key file in the real
+/// user profile first, and then read the script and call the real API, which no test may do (AC-5). The failures that come after
+/// that check (a missing script, a wrong extension, an empty script) are tested in process by <c>CliFailureOutputTests</c>
+/// against an in-memory profile. As a second guard the child process gets no <c>OPENROUTER_API_KEY</c> and a proxy that points at a closed local port, so an
 /// accidental request could not leave the machine.</summary>
-public sealed class CliProcessTests : IDisposable
+public sealed class CliProcessTests
 {
-    private readonly string _directory = Path.Combine(Path.GetTempPath(), "pg-proc-" + Guid.NewGuid().ToString("N"));
-
-    public CliProcessTests()
-    {
-        Directory.CreateDirectory(_directory);
-    }
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
-
     private static string CliDll()
     {
         var baseDirectory = Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory);
@@ -86,13 +72,6 @@ public sealed class CliProcessTests : IDisposable
         }
 
         return (process.ExitCode, output.GetAwaiter().GetResult(), error.GetAwaiter().GetResult());
-    }
-
-    private string Write(string name, string text)
-    {
-        var path = Path.Combine(_directory, name);
-        File.WriteAllText(path, text);
-        return path;
     }
 
     // AC-16
@@ -152,68 +131,42 @@ public sealed class CliProcessTests : IDisposable
         Assert.DoesNotContain("\n", output.TrimEnd('\r', '\n'), StringComparison.Ordinal);
     }
 
-    // AC-18
-    [Fact]
-    public void A_missing_script_names_the_path_and_exits_1()
-    {
-        var missing = Path.Combine(_directory, "missing.txt");
-
-        var (exitCode, output, error) = Run(missing);
-
-        Assert.Equal(1, exitCode);
-        Assert.Empty(output);
-        Assert.Contains(missing, error, StringComparison.Ordinal);
-    }
-
-    // AC-19
+    // cli-set-config AC-4: a key or value that is not usable is rejected with exactly "Invalid input" before any file is
+    // touched, so these are safe to run against the real built program.
     [Theory]
-    [InlineData("script.md")]
-    [InlineData("script.docx")]
-    public void A_script_that_is_not_txt_is_rejected_saying_only_txt_is_supported(string fileName)
+    [InlineData("", "value")]
+    [InlineData("   ", "value")]
+    [InlineData("MY KEY", "value")]
+    [InlineData("MY_KEY", "")]
+    [InlineData("MY_KEY", "   ")]
+    public void Set_config_with_an_unusable_key_or_value_prints_Invalid_input_and_exits_1(string key, string value)
     {
-        var path = Write(fileName, "CECIL: Good evening.\n");
-
-        var (exitCode, output, error) = Run(path);
+        var (exitCode, output, error) = Run("--set-config", key, value);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(output);
-        Assert.Contains(".txt", error, StringComparison.Ordinal);
+        Assert.Equal("Invalid input", error.TrimEnd('\r', '\n'));
     }
 
-    // AC-13
     [Fact]
-    public void An_output_path_that_is_not_mp3_names_the_required_extension_and_exits_1()
+    public void Set_config_without_a_value_is_a_usage_error_and_exits_1()
     {
-        var script = Write("episode.txt", "CECIL: Good evening.\n");
-
-        var (exitCode, output, error) = Run(script, Path.Combine(_directory, "out.wav"));
+        var (exitCode, output, error) = Run("--set-config", "MY_KEY");
 
         Assert.Equal(1, exitCode);
         Assert.Empty(output);
-        Assert.Contains(".mp3", error, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(_directory, "out.wav")));
+        Assert.Contains("--set-config", error, StringComparison.Ordinal);
+        Assert.Contains("--set-config <KEY> <VALUE>", error, StringComparison.Ordinal);
     }
 
-    // AC-20
+    // cli-set-config AC-12: help lists the new command and, like version, does not touch the config folder (it would have
+    // exited 0 with nothing on standard error).
     [Fact]
-    public void A_script_with_nothing_to_narrate_says_so_and_exits_1()
+    public void Help_lists_the_set_config_command()
     {
-        var script = Write("cues.txt", "[MUSIC: THEME]\n\n(BEAT)\n\nEND\n");
+        var (exitCode, output, _) = Run("--help");
 
-        var (exitCode, output, error) = Run(script);
-
-        Assert.Equal(1, exitCode);
-        Assert.Empty(output);
-        Assert.Contains("nothing to narrate", error, StringComparison.OrdinalIgnoreCase);
-    }
-
-    // AC-15: every failure message goes to standard error, with no stack trace.
-    [Fact]
-    public void A_failure_message_is_one_line_of_text_and_no_stack_trace()
-    {
-        var (_, _, error) = Run(Path.Combine(_directory, "missing.txt"));
-
-        Assert.DoesNotMatch(new Regex(@"\bat [A-Za-z.]+\(", RegexOptions.None), error);
-        Assert.StartsWith("Error:", error, StringComparison.Ordinal);
+        Assert.Equal(0, exitCode);
+        Assert.Contains("--set-config <KEY> <VALUE>", output, StringComparison.Ordinal);
     }
 }

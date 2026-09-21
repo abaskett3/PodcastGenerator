@@ -1,4 +1,5 @@
 using PodcastGenerator.Application.Generation;
+using PodcastGenerator.Cli;
 using PodcastGenerator.Application.Narration;
 using PodcastGenerator.Application.Runtime;
 using PodcastGenerator.Application.Scripts;
@@ -22,6 +23,7 @@ internal sealed class ServiceFixture
         Workspaces = new FakeAudioWorkspaceFactory(FileSystem);
         Delayer = new FakeDelayer();
         Reporter = new RecordingReporter();
+        Prompter = new FakeConfigPrompter();
         Clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 19, 12, 0, 0, TimeSpan.Zero));
         Defaults = new EmbeddedDefaultResources();
 
@@ -48,6 +50,8 @@ internal sealed class ServiceFixture
     public FakeDelayer Delayer { get; }
 
     public RecordingReporter Reporter { get; }
+
+    public FakeConfigPrompter Prompter { get; }
 
     public FixedTimeProvider Clock { get; }
 
@@ -76,6 +80,11 @@ internal sealed class ServiceFixture
             new OutputPathResolver(FileSystem, Paths, Clock),
             Delayer,
             Reporter);
+
+    public ConfigService CreateConfigService(RequiredConfig? required = null) =>
+        new(FileSystem, Paths, Environment, Prompter, required ?? new RequiredConfig([ApiKeyProvider.KeyName]));
+
+    public CliRunner CreateRunner() => new(CreateService(), CreateConfigService());
 
     public Task<GenerationResult> RunAsync(string? outputPath = null, CancellationToken cancellationToken = default) =>
         CreateService().GenerateAsync(new GenerationRequest(ScriptPath, outputPath), cancellationToken);

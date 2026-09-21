@@ -104,7 +104,8 @@ public sealed class KeyAndRuntimeFolderTests : IDisposable
         Assert.Equal(EnvironmentKey, SentKey());
     }
 
-    // AC-24, D-13: no key. The message names the file and its content, no request, and the runtime folder exists.
+    // AC-24, D-13, and cli-set-config AC-8: no key and no console input to ask for it. The message names the file and how to set
+    // the value (--set-config), no request is made, and the runtime folder and key file exist.
     [Fact]
     public async Task No_key_gives_the_full_key_file_path_and_the_line_format_makes_no_request_and_creates_the_runtime_folder()
     {
@@ -115,8 +116,10 @@ public sealed class KeyAndRuntimeFolderTests : IDisposable
         Assert.Empty(_pipeline.Out.ToString());
         var error = _pipeline.Err.ToString();
         Assert.Contains(_pipeline.Paths.KeyFilePath, error, StringComparison.Ordinal);
-        Assert.Contains("OPENROUTER_API_KEY=<key>", error, StringComparison.Ordinal);
+        Assert.Contains("--set-config OPENROUTER_API_KEY", error, StringComparison.Ordinal);
+        Assert.Equal(["OPENROUTER_API_KEY"], _pipeline.Prompter.Asked);
         Assert.True(Directory.Exists(_pipeline.Paths.RuntimeFolder));
+        Assert.True(File.Exists(_pipeline.Paths.KeyFilePath));
         Assert.False(File.Exists(_pipeline.DefaultOutputPath));
     }
 
