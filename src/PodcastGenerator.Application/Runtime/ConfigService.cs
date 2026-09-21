@@ -9,8 +9,9 @@ public sealed record RequiredConfig(IReadOnlyList<string> Keys);
 public interface IConfigService
 {
     /// <summary>Sets <paramref name="key"/> to <paramref name="value"/> in the key file, creating the runtime folder and the
-    /// file first when they are missing, and updating the existing line for the key in place (AC-1 to AC-4). Nothing is
-    /// touched when the key or the value is rejected.</summary>
+    /// file first when they are missing. Every existing line for the key (matched without regard to case) is removed and
+    /// one new <c>KEY=VALUE</c> line is appended, so the key is unique afterwards (AC-1 to AC-4, user decision, fix round 1).
+    /// Nothing is touched when the key or the value is rejected.</summary>
     /// <exception cref="InvalidInputException">The key or the value is not usable.</exception>
     /// <exception cref="UserFacingException">The file could not be written.</exception>
     Task SetAsync(string key, string value, CancellationToken cancellationToken);

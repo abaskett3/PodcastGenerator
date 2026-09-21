@@ -7,11 +7,11 @@ namespace PodcastGenerator.Application.Runtime;
 /// key is the text before the first <c>=</c>).</summary>
 public static class EnvFileEditor
 {
-    /// <summary>Sets <paramref name="key"/> to <paramref name="value"/> (AC-3). Every line for that key, matched without
-    /// regard to case, is rewritten in place as <c>KEY=VALUE</c> with the key spelled as given: the app reads the key with
-    /// an exact-case match, so keeping a different spelling would leave the new value unused, and rewriting every
-    /// duplicate keeps the last-duplicate-wins rule from hiding the new value. Every other line, and the line ending of
-    /// each rewritten line, is kept as it is. When there is no line for the key a new one is added at the end.</summary>
+    /// <summary>Sets <paramref name="key"/> to <paramref name="value"/> and keeps the key unique (AC-3, user decision, fix
+    /// round 1): every line for that key, matched without regard to case, is removed and one new <c>KEY=VALUE</c> line,
+    /// with the key spelled as given, is added at the end. Every other line, and its line ending, is kept exactly as it
+    /// is. The new line uses the file's first line ending (taken before any line is removed), or the platform's for a
+    /// file with none.</summary>
     public static string SetValue(string contents, string key, string value)
     {
         ArgumentNullException.ThrowIfNull(contents);
@@ -19,21 +19,9 @@ public static class EnvFileEditor
         ArgumentNullException.ThrowIfNull(value);
 
         var lines = Split(contents);
-        var found = false;
-        for (var index = 0; index < lines.Count; index++)
-        {
-            if (IsLineFor(lines[index].Text, key))
-            {
-                lines[index] = lines[index] with { Text = $"{key}={value}" };
-                found = true;
-            }
-        }
-
-        if (!found)
-        {
-            AddLine(lines, key, value);
-        }
-
+        var newline = LineEndingOf(lines);
+        lines.RemoveAll(line => IsLineFor(line.Text, key));
+        AddLine(lines, key, value, newline);
         return Join(lines);
     }
 
@@ -46,15 +34,16 @@ public static class EnvFileEditor
         ArgumentNullException.ThrowIfNull(value);
 
         var lines = Split(contents);
-        AddLine(lines, key, value);
+        AddLine(lines, key, value, LineEndingOf(lines));
         return Join(lines);
     }
 
-    private static void AddLine(List<Line> lines, string key, string value)
-    {
-        // Use the file's own line ending; a file with none yet gets the platform's.
-        var newline = lines.Select(line => line.Ending).FirstOrDefault(ending => ending.Length > 0) ?? Environment.NewLine;
+    /// <summary>The file's own line ending (the first one found); a file with none yet gets the platform's.</summary>
+    private static string LineEndingOf(List<Line> lines) =>
+        lines.Select(line => line.Ending).FirstOrDefault(ending => ending.Length > 0) ?? Environment.NewLine;
 
+    private static void AddLine(List<Line> lines, string key, string value, string newline)
+    {
         if (lines.Count > 0 && lines[^1].Ending.Length == 0)
         {
             lines[^1] = lines[^1] with { Ending = newline };

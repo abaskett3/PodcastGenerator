@@ -84,31 +84,71 @@ public sealed class ConfigIntegrationTests : IDisposable
         Assert.Equal(["MY_KEY=my-value"], File.ReadAllLines(_pipeline.Paths.KeyFilePath));
     }
 
-    // AC-3: the key is matched without regard to case, the line is updated where it is, no duplicate is added, and every other
-    // line (a comment, another key, a line with no final line ending) is left exactly as it was.
+    // AC-3, user decision (fix round 1): the key is matched without regard to case; every line for it is removed and one new line
+    // is appended, so the key is unique; every other line (a comment, another key, a line with no final line ending) is left
+    // exactly as it was, in the same order. This replaces the old test
+    // Set_config_updates_the_existing_line_in_place_and_leaves_every_other_line_unchanged.
     [Fact]
-    public async Task Set_config_updates_the_existing_line_in_place_and_leaves_every_other_line_unchanged()
+    public async Task Set_config_removes_every_line_for_the_key_and_appends_one_and_leaves_every_other_line_unchanged()
     {
-        WriteKeyFileBytes("# my keys\r\nOTHER_KEY=keep me\r\nopenrouter_api_key=old\r\nLAST_KEY=\"quoted\"");
+        WriteKeyFileBytes("# my keys\r\nOTHER_KEY=keep me\r\nopenrouter_api_key=old\r\nOpenRouter_Api_Key=older\r\nLAST_KEY=\"quoted\"");
 
         var exitCode = await _pipeline.RunSetConfigAsync(KeyName, "sk-test-NEW");
 
         Assert.Equal(0, exitCode);
         Assert.Equal(
-            "# my keys\r\nOTHER_KEY=keep me\r\nOPENROUTER_API_KEY=sk-test-NEW\r\nLAST_KEY=\"quoted\"",
+            "# my keys\r\nOTHER_KEY=keep me\r\nLAST_KEY=\"quoted\"\r\nOPENROUTER_API_KEY=sk-test-NEW\r\n",
             File.ReadAllText(_pipeline.Paths.KeyFilePath));
         Assert.Single(File.ReadAllLines(_pipeline.Paths.KeyFilePath), line => line.StartsWith(KeyName, StringComparison.OrdinalIgnoreCase));
     }
 
-    // AC-3: the same line, same case, and the line is not moved.
+    // AC-3, user decision (fix round 1): a line in the middle moves to the end (this replaces the old test
+    // Set_config_updates_a_line_in_the_middle_of_the_file_without_moving_it); the other lines keep their order.
     [Fact]
-    public async Task Set_config_updates_a_line_in_the_middle_of_the_file_without_moving_it()
+    public async Task Set_config_moves_the_key_to_the_end_of_the_file_and_keeps_the_order_of_the_other_lines()
     {
         WriteKeyFileBytes("A=1\nMY_KEY=old\nB=2\n");
 
         await _pipeline.RunSetConfigAsync("MY_KEY", "new");
 
-        Assert.Equal("A=1\nMY_KEY=new\nB=2\n", File.ReadAllText(_pipeline.Paths.KeyFilePath));
+        Assert.Equal("A=1\nB=2\nMY_KEY=new\n", File.ReadAllText(_pipeline.Paths.KeyFilePath));
+    }
+
+    // The bug the tester found (docs/bugs/cli-set-config-1.md): a working OPENROUTER_API_KEY line and a set-config with a
+    // lowercase spelling. Now the key stays present, the file has one line for it (the spelling typed), and the next run uses the
+    // new value without a prompt.
+    [Fact]
+    public async Task Set_config_with_a_lowercase_key_keeps_the_key_usable_and_the_file_unique()
+    {
+        WriteKeyFileBytes("OPENROUTER_API_KEY=sk-test-OLD-GOOD\n");
+
+        var exitCode = await _pipeline.RunSetConfigAsync("openrouter_api_key", "sk-test-NEW-LOWER");
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(["openrouter_api_key=sk-test-NEW-LOWER"], File.ReadAllLines(_pipeline.Paths.KeyFilePath));
+        Assert.Equal("sk-test-NEW-LOWER", KeyValue(File.ReadAllText(_pipeline.Paths.KeyFilePath), KeyName));
+
+        _pipeline.ResetOutput();
+        var runExitCode = await _pipeline.RunAsync(OneLineScript());
+
+        Assert.Equal(0, runExitCode);
+        Assert.Equal("sk-test-NEW-LOWER", SentKey());
+        Assert.Empty(_pipeline.Prompter.Asked);
+        Assert.DoesNotContain("not found", _pipeline.Err.ToString(), StringComparison.Ordinal);
+    }
+
+    // User decision (fix round 1): a lowercase key line in the file satisfies the check and is used by the run.
+    [Fact]
+    public async Task A_lowercase_key_line_in_the_file_is_present_and_used_without_a_prompt()
+    {
+        WriteKeyFileBytes("openrouter_api_key=sk-test-FILE-KEY-0001\n");
+
+        var exitCode = await _pipeline.RunAsync(OneLineScript());
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("sk-test-FILE-KEY-0001", SentKey());
+        Assert.Empty(_pipeline.Prompter.Asked);
+        Assert.DoesNotContain("not found", _pipeline.Err.ToString(), StringComparison.Ordinal);
     }
 
     // AC-3: no line for the key yet, so a new line is added and the existing lines are unchanged.
@@ -215,6 +255,14 @@ public sealed class ConfigIntegrationTests : IDisposable
         { "MY_KEY", " \t " },
     };
 
+    // User decision (fix round 1): a value that is only a pair of quotes is an empty string (the parser would read it back as
+    // empty), so it is rejected like any other empty value. Also used by the prompt tests below.
+    public static TheoryData<string, string> UnusableInputFromUserDecisions => new()
+    {
+        { "MY_KEY", "\"\"" },
+        { "MY_KEY", "''" },
+    };
+
     // The extra rules the design adds (D-7): a key the file format could not read back, and a value that would write a second
     // line. They are rejected with the same message.
     public static TheoryData<string, string> UnusableInputFromTheDesign => new()
@@ -231,6 +279,7 @@ public sealed class ConfigIntegrationTests : IDisposable
     [Theory]
     [MemberData(nameof(UnusableInputFromTheSpec))]
     [MemberData(nameof(UnusableInputFromTheDesign))]
+    [MemberData(nameof(UnusableInputFromUserDecisions))]
     public async Task Set_config_with_an_unusable_key_or_value_prints_exactly_Invalid_input_and_creates_nothing(string key, string value)
     {
         var exitCode = await _pipeline.RunSetConfigAsync(key, value);
@@ -246,6 +295,7 @@ public sealed class ConfigIntegrationTests : IDisposable
     [Theory]
     [MemberData(nameof(UnusableInputFromTheSpec))]
     [MemberData(nameof(UnusableInputFromTheDesign))]
+    [MemberData(nameof(UnusableInputFromUserDecisions))]
     public async Task Set_config_with_an_unusable_key_or_value_leaves_an_existing_file_byte_for_byte_unchanged(string key, string value)
     {
         WriteKeyFileBytes("# keep\r\nMY_KEY=old\r\nOTHER=1");
@@ -482,6 +532,23 @@ public sealed class ConfigIntegrationTests : IDisposable
         Assert.Equal(TypedKey, SentKey());
     }
 
+    // AC-9, user decision (fix round 1): a pair of quotes is an empty string at the prompt too. Nothing is written for it.
+    [Theory]
+    [InlineData("\"\"")]
+    [InlineData("''")]
+    public async Task A_pair_of_quotes_at_the_prompt_is_rejected_with_Invalid_input_and_asked_again(string entry)
+    {
+        TypeAtTheConsole(entry, TypedKey);
+
+        var exitCode = await _pipeline.RunAsync(OneLineScript());
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(Regex.Matches(_pipeline.Err.ToString(), Regex.Escape("Invalid input")));
+        Assert.Equal(2, Regex.Matches(_pipeline.Err.ToString(), Regex.Escape($"{KeyName}: ")).Count);
+        Assert.Equal([$"{KeyName}={TypedKey}"], File.ReadAllLines(_pipeline.Paths.KeyFilePath));
+        Assert.Equal(TypedKey, SentKey());
+    }
+
     // AC-9: the fifth attempt can still be the valid one.
     [Fact]
     public async Task The_fifth_attempt_can_still_succeed()
@@ -617,7 +684,8 @@ public sealed class ConfigIntegrationTests : IDisposable
         // must contain". The message still names the file and the line it holds (this replaces the "OPENROUTER_API_KEY=<key>"
         // assertion in KeyAndRuntimeFolderTests, which the coding agent changed).
         Assert.Contains(_pipeline.Paths.KeyFilePath, _pipeline.Err.ToString(), StringComparison.Ordinal);
-        Assert.Contains($"{KeyName}=", _pipeline.Err.ToString(), StringComparison.Ordinal);
+        Assert.Contains($"{KeyName}=<value>", _pipeline.Err.ToString(), StringComparison.Ordinal);
+        Assert.Contains($"--set-config {KeyName}", _pipeline.Err.ToString(), StringComparison.Ordinal);
     }
 
     // ---------------------------------------------------------------- regression: what the change could have broken

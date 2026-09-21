@@ -59,10 +59,41 @@ public class EnvFileParserTests
         Assert.Null(EnvFileParser.GetValue("OTHER_KEY=1\nOPENROUTER_API_KEY_2=nope\n", Key));
     }
 
-    [Fact]
-    public void The_key_name_is_case_sensitive()
+    // User decision (cli-set-config fix round 1): config keys are read without regard to case. This replaces the old test
+    // The_key_name_is_case_sensitive.
+    [Theory]
+    [InlineData("openrouter_api_key=abc")]
+    [InlineData("OpenRouter_Api_Key=abc")]
+    [InlineData("OPENROUTER_API_KEY=abc")]
+    public void The_key_name_is_matched_without_regard_to_case(string contents)
     {
-        Assert.Null(EnvFileParser.GetValue("openrouter_api_key=abc", Key));
+        Assert.Equal("abc", EnvFileParser.GetValue(contents, Key));
+        Assert.Equal("abc", EnvFileParser.GetValue(contents, Key.ToLowerInvariant()));
+    }
+
+    [Fact]
+    public void A_key_that_only_differs_in_more_than_case_is_still_another_key()
+    {
+        Assert.Null(EnvFileParser.GetValue("OPENROUTER_API_KEYS=abc\nOPENROUTER_API_KE=abc", Key));
+    }
+
+    [Fact]
+    public void The_last_duplicate_wins_across_different_spellings_of_the_key()
+    {
+        Assert.Equal("second", EnvFileParser.GetValue("OPENROUTER_API_KEY=first\nopenrouter_api_key=second\n", Key));
+        Assert.Equal("second", EnvFileParser.GetValue("openrouter_api_key=first\nOPENROUTER_API_KEY=second\n", Key));
+    }
+
+    [Fact]
+    public void Every_other_parser_rule_still_applies_to_a_key_of_any_case()
+    {
+        // BOM, CRLF, comment and blank lines, other keys, spaces around the key and the value, one pair of quotes.
+        var contents = "\uFEFF# comment\r\n\r\nOTHER=x\r\n  openrouter_api_key = \"abc\"  \r\n";
+
+        Assert.Equal("abc", EnvFileParser.GetValue(contents, Key));
+        Assert.Null(EnvFileParser.GetValue("openrouter_api_key=\r\n", Key));
+        Assert.Null(EnvFileParser.GetValue("# openrouter_api_key=abc\n", Key));
+        Assert.Null(EnvFileParser.GetValue("openrouter_api_key=abc\nOPENROUTER_API_KEY=\"\"\n", Key));
     }
 
     [Fact]

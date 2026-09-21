@@ -62,6 +62,32 @@ public class ConfigInputTests
         Assert.False(ConfigInput.IsValidValue(value));
     }
 
+    // cli-set-config, user decision (fix round 1): a value that is only a pair of quotes is an empty string, because the file
+    // parser removes one pair of quotes and would read it back as empty (CLAUDE.md: an empty value is treated as missing).
+    [Theory]
+    [InlineData("\"\"")]
+    [InlineData("''")]
+    [InlineData("  \"\"  ")]
+    [InlineData("\" \"")]
+    [InlineData("' '")]
+    public void A_value_that_is_only_a_pair_of_quotes_is_invalid_because_the_parser_reads_it_as_empty(string value)
+    {
+        Assert.False(ConfigInput.IsValidValue(value));
+    }
+
+    // A quote that does not form a pair around nothing is an ordinary value.
+    [Theory]
+    [InlineData("\"")]
+    [InlineData("'")]
+    [InlineData("\"a\"")]
+    [InlineData("\"\"\"")]
+    [InlineData("\"'")]
+    public void A_value_with_a_quote_that_is_not_an_empty_pair_is_valid(string value)
+    {
+        Assert.True(ConfigInput.IsValidValue(value));
+        Assert.NotNull(EnvFileParser.GetValue("K=" + value, "K"));
+    }
+
     [Theory]
     [InlineData("one\ntwo")]
     [InlineData("one\rtwo")]
@@ -81,25 +107,29 @@ public class ConfigInputTests
 
 public class EnvFileEditorTests
 {
-    // cli-set-config AC-3
+    // cli-set-config AC-3, user decision (fix round 1): the line for the key is removed and one new line is appended, so the key
+    // is unique; every other line is unchanged and keeps its place.
     [Fact]
-    public void An_existing_line_is_updated_in_place_and_every_other_line_is_unchanged()
+    public void An_existing_line_is_removed_and_one_new_line_is_appended_and_every_other_line_is_unchanged()
     {
         const string Before = "# my config\nFIRST=1\nOPENROUTER_API_KEY=old\n\nLAST=3\n";
 
         var after = EnvFileEditor.SetValue(Before, "OPENROUTER_API_KEY", "new");
 
-        Assert.Equal("# my config\nFIRST=1\nOPENROUTER_API_KEY=new\n\nLAST=3\n", after);
+        Assert.Equal("# my config\nFIRST=1\n\nLAST=3\nOPENROUTER_API_KEY=new\n", after);
     }
 
     [Fact]
-    public void The_key_is_matched_without_regard_to_case_and_written_as_given()
+    public void The_key_is_matched_without_regard_to_case_and_the_new_line_uses_the_spelling_the_user_typed()
     {
-        var after = EnvFileEditor.SetValue("openrouter_api_key=old\nOTHER=x\n", "OPENROUTER_API_KEY", "new");
+        var upperTyped = EnvFileEditor.SetValue("openrouter_api_key=old\nOTHER=x\n", "OPENROUTER_API_KEY", "new");
+        var lowerTyped = EnvFileEditor.SetValue("OPENROUTER_API_KEY=old\nOTHER=x\n", "openrouter_api_key", "new");
 
-        Assert.Equal("OPENROUTER_API_KEY=new\nOTHER=x\n", after);
-        // The app reads the key with an exact-case match, so the new value is the one it finds.
-        Assert.Equal("new", EnvFileParser.GetValue(after, "OPENROUTER_API_KEY"));
+        Assert.Equal("OTHER=x\nOPENROUTER_API_KEY=new\n", upperTyped);
+        Assert.Equal("OTHER=x\nopenrouter_api_key=new\n", lowerTyped);
+        // The parser matches keys without regard to case too, so the working value is never lost to a spelling difference.
+        Assert.Equal("new", EnvFileParser.GetValue(upperTyped, "OPENROUTER_API_KEY"));
+        Assert.Equal("new", EnvFileParser.GetValue(lowerTyped, "OPENROUTER_API_KEY"));
     }
 
     [Fact]
@@ -107,16 +137,30 @@ public class EnvFileEditorTests
     {
         var after = EnvFileEditor.SetValue("  KEY = \"old\"  \nOTHER=x\n", "KEY", "new");
 
-        Assert.Equal("KEY=new\nOTHER=x\n", after);
+        Assert.Equal("OTHER=x\nKEY=new\n", after);
     }
 
     [Fact]
-    public void Every_duplicate_line_for_the_key_is_updated_so_the_last_one_cannot_hide_the_new_value()
+    public void Every_duplicate_line_for_the_key_in_any_case_is_removed_so_the_key_is_unique()
     {
-        var after = EnvFileEditor.SetValue("KEY=one\nOTHER=x\nKEY=two\n", "KEY", "new");
+        var after = EnvFileEditor.SetValue("KEY=one\nOTHER=x\nkey=two\nKey=three\nLAST=y\n", "KEY", "new");
 
-        Assert.Equal("KEY=new\nOTHER=x\nKEY=new\n", after);
+        Assert.Equal("OTHER=x\nLAST=y\nKEY=new\n", after);
         Assert.Equal("new", EnvFileParser.GetValue(after, "KEY"));
+    }
+
+    [Fact]
+    public void A_key_that_is_the_only_line_is_replaced_and_keeps_the_files_line_ending()
+    {
+        Assert.Equal("KEY=new\r\n", EnvFileEditor.SetValue("KEY=old\r\n", "KEY", "new"));
+        Assert.Equal("KEY=new\n", EnvFileEditor.SetValue("KEY=old\n", "KEY", "new"));
+    }
+
+    [Fact]
+    public void A_removed_last_line_without_a_line_ending_leaves_the_others_intact_and_the_new_line_is_last()
+    {
+        Assert.Equal("A=1\nB=2\nKEY=new\n", EnvFileEditor.SetValue("A=1\nKEY=old\nB=2", "KEY", "new"));
+        Assert.Equal("A=1\nKEY=new\n", EnvFileEditor.SetValue("A=1\nKEY=old", "KEY", "new"));
     }
 
     [Fact]
@@ -168,7 +212,7 @@ public class EnvFileEditorTests
         var updated = EnvFileEditor.SetValue("A=1\r\nKEY=old\r\nB=2\r\n", "KEY", "new");
         var added = EnvFileEditor.SetValue("A=1\r\nB=2\r\n", "KEY", "new");
 
-        Assert.Equal("A=1\r\nKEY=new\r\nB=2\r\n", updated);
+        Assert.Equal("A=1\r\nB=2\r\nKEY=new\r\n", updated);
         Assert.Equal("A=1\r\nB=2\r\nKEY=new\r\n", added);
     }
 
@@ -177,7 +221,7 @@ public class EnvFileEditorTests
     {
         var after = EnvFileEditor.SetValue("A=1\rKEY=old\rB=2\r", "KEY", "new");
 
-        Assert.Equal("A=1\rKEY=new\rB=2\r", after);
+        Assert.Equal("A=1\rB=2\rKEY=new\r", after);
     }
 
     [Fact]
@@ -185,7 +229,7 @@ public class EnvFileEditorTests
     {
         var after = EnvFileEditor.SetValue("﻿KEY=old\nOTHER=x\n", "KEY", "new");
 
-        Assert.Equal("KEY=new\nOTHER=x\n", after);
+        Assert.Equal("OTHER=x\nKEY=new\n", after);
     }
 
     [Fact]
@@ -268,14 +312,29 @@ public class ConfigServiceTests
 
     // cli-set-config AC-3
     [Fact]
-    public async Task Set_updates_the_existing_line_in_place_matching_the_key_without_regard_to_case()
+    public async Task Set_removes_every_line_for_the_key_in_any_case_and_appends_one_line_with_the_typed_spelling()
     {
         var fixture = Fresh();
-        fixture.FileSystem.Files[fixture.Paths.KeyFilePath] = "# note\nopenrouter_api_key=old\nOTHER=keep\n";
+        fixture.FileSystem.Files[fixture.Paths.KeyFilePath] = "# note\nopenrouter_api_key=old\nOTHER=keep\nOpenRouter_Api_Key=older\n";
 
         await fixture.CreateConfigService().SetAsync(KeyName, "new", CancellationToken.None);
 
-        Assert.Equal($"# note\n{KeyName}=new\nOTHER=keep\n", FileText(fixture));
+        Assert.Equal($"# note\nOTHER=keep\n{KeyName}=new\n", FileText(fixture));
+    }
+
+    // The spelling typed is the spelling written, also when it differs from the required key's, and the app still finds it.
+    [Fact]
+    public async Task Set_writes_the_spelling_typed_and_the_app_still_finds_the_value()
+    {
+        var fixture = Fresh();
+        fixture.FileSystem.Files[fixture.Paths.KeyFilePath] = $"{KeyName}=old-good\n";
+
+        await fixture.CreateConfigService().SetAsync("openrouter_api_key", "new-lower", CancellationToken.None);
+
+        Assert.Equal("openrouter_api_key=new-lower\n", FileText(fixture));
+        Assert.Equal("new-lower", EnvFileParser.GetValue(FileText(fixture), KeyName));
+        await fixture.CreateConfigService().EnsureRequiredAsync(CancellationToken.None);
+        Assert.Empty(fixture.Prompter.Asked);
     }
 
     [Fact]
@@ -318,6 +377,8 @@ public class ConfigServiceTests
     [InlineData("KEY", "")]
     [InlineData("KEY", "   ")]
     [InlineData("KEY", "line one\nline two")]
+    [InlineData("KEY", "\"\"")]
+    [InlineData("KEY", "''")]
     public async Task Set_rejects_an_unusable_key_or_value_with_the_fixed_message_and_changes_nothing(string key, string value)
     {
         var fixture = Fresh();
@@ -518,7 +579,52 @@ public class ConfigServiceTests
         Assert.DoesNotContain("Invalid input", fixture.Prompter.Messages);
         Assert.Contains($"--set-config {KeyName}", exception.Message, StringComparison.Ordinal);
         Assert.Contains(fixture.Paths.KeyFilePath, exception.Message, StringComparison.Ordinal);
+        // CLAUDE.md, Usage: the error says where the key file goes and what it must contain (the line KEY=<value>).
+        Assert.Contains($"{KeyName}=<value>", exception.Message, StringComparison.Ordinal);
         Assert.Contains($"{KeyName} environment variable", exception.Message, StringComparison.Ordinal);
+    }
+
+    // cli-set-config, user decision (fix round 1): a pair of quotes is an empty string at the prompt too.
+    [Theory]
+    [InlineData("\"\"")]
+    [InlineData("''")]
+    public async Task A_pair_of_quotes_at_the_prompt_is_rejected_with_Invalid_input_and_nothing_is_written(string entry)
+    {
+        var fixture = Fresh();
+        fixture.Prompter.Answers.AddRange([entry, Secret]);
+
+        await fixture.CreateConfigService().EnsureRequiredAsync(CancellationToken.None);
+
+        Assert.Equal(2, fixture.Prompter.Asked.Count);
+        Assert.Single(fixture.Prompter.Messages, message => message == "Invalid input");
+        Assert.Equal($"{KeyName}={Secret}" + Environment.NewLine, FileText(fixture));
+    }
+
+    // cli-set-config, user decision (fix round 1): keys are read without regard to case, so a lowercase line with a value
+    // satisfies the check; a lowercase line with an empty value is still missing, and the prompt only appends (AC-10), so the
+    // appended line, being last, wins.
+    [Fact]
+    public async Task A_lowercase_key_line_with_a_value_counts_as_present()
+    {
+        var fixture = Fresh();
+        fixture.FileSystem.Files[fixture.Paths.KeyFilePath] = "openrouter_api_key=from-file\n";
+
+        await fixture.CreateConfigService().EnsureRequiredAsync(CancellationToken.None);
+
+        Assert.Empty(fixture.Prompter.Asked);
+    }
+
+    [Fact]
+    public async Task An_empty_lowercase_key_line_is_left_alone_and_the_typed_value_is_appended_after_it()
+    {
+        var fixture = Fresh();
+        fixture.FileSystem.Files[fixture.Paths.KeyFilePath] = "openrouter_api_key=\nOTHER=x\n";
+        fixture.Prompter.Answers.Add("typed");
+
+        await fixture.CreateConfigService().EnsureRequiredAsync(CancellationToken.None);
+
+        Assert.Equal($"openrouter_api_key=\nOTHER=x\n{KeyName}=typed\n", FileText(fixture));
+        Assert.Equal("typed", EnvFileParser.GetValue(FileText(fixture), KeyName));
     }
 
     [Fact]
@@ -607,14 +713,14 @@ public sealed class ConfigServiceOnDiskTests : IDisposable
 
     // cli-set-config AC-3
     [Fact]
-    public async Task Set_updates_the_line_in_place_on_disk_and_keeps_the_other_lines_and_their_line_endings()
+    public async Task Set_removes_the_old_line_and_appends_the_new_one_on_disk_and_keeps_the_other_lines_and_their_line_endings()
     {
         Directory.CreateDirectory(_paths.RuntimeFolder);
         await File.WriteAllTextAsync(_paths.KeyFilePath, "# mine\r\nopenrouter_api_key=old\r\nOTHER=keep\r\n");
 
         await Create().SetAsync("OPENROUTER_API_KEY", "new", CancellationToken.None);
 
-        Assert.Equal("# mine\r\nOPENROUTER_API_KEY=new\r\nOTHER=keep\r\n", await File.ReadAllTextAsync(_paths.KeyFilePath));
+        Assert.Equal("# mine\r\nOTHER=keep\r\nOPENROUTER_API_KEY=new\r\n", await File.ReadAllTextAsync(_paths.KeyFilePath));
     }
 
     // cli-set-config AC-6, AC-8, AC-10
