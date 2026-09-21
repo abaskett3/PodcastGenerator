@@ -20,13 +20,16 @@ its folder is removed as part of this feature.
     `<KEY>` is rejected with the error message `Invalid input` and the command exits with a failure code, making no
     change to the file.
   - `<VALUE>` must not be blank, an empty string, or whitespace-only; an invalid `<VALUE>` is rejected the same way,
-    with the same `Invalid input` message and failure exit code.
+    with the same `Invalid input` message and failure exit code. **User decision, fix round 1:** a value that is
+    literally two quote characters (`""` or `''`) is an empty string and is rejected the same way.
   - Writes `KEY=VALUE` into `PodcastGenerator.env` in the runtime config folder
     (`Environment.SpecialFolder.UserProfile`/.config/PodcastGenerator/PodcastGenerator.env`, built with `Path.Combine`).
   - Creates the config folder and/or the file first if either does not exist yet.
-  - If `PodcastGenerator.env` already has a line for that key (matched case-insensitively), that line is updated in
-    place with the new value instead of adding a second line for the same key. If the key is not yet in the file, a
-    new `KEY=VALUE` line is added.
+  - **User decision, fix round 1 (supersedes the earlier "update in place" wording):** a key is unique in the file after
+    the command. Every existing line for that key (matched case-insensitively) is removed and one new `KEY=VALUE` line
+    is appended, spelled as the user typed the key. If the key is not yet in the file, the new line is appended the same
+    way. Every non-matching line stays unchanged. ("Configs should be unique. I know this contradicts previous commands
+    where we do not delete lines. I am overriding that.")
   - Like `--help` and `--version`, this command does not go on to generate a podcast; it sets the value and exits.
 - Main command (generating a podcast, i.e. any invocation that is not `--set-config`, `--help`, or `--version`):
   - Before doing anything else, checks whether the config folder and `PodcastGenerator.env` exist. If either is
@@ -38,12 +41,13 @@ its folder is removed as part of this feature.
     `<CONFIG_KEY_NAME_HERE> not found. Please set this config value to continue.` (with the actual key name in place
     of the placeholder) and interactively prompts the user for it on the console.
     - Rejects a blank entry, an empty string, or a whitespace-only entry with the `Invalid input` message, and
-      re-prompts.
+      re-prompts. **User decision, fix round 1:** an entry that is literally two quote characters (`""` or `''`) counts
+      as an empty string, because the key file parser removes one pair of quotes and would read it back as empty.
     - The user gets up to 5 attempts total for that value. If the 5th attempt is also invalid, the run fails (exit
       code 1) without generating a podcast.
     - Once a valid value is entered, it is appended as a new `KEY=VALUE` line to `PodcastGenerator.env`. This path
-      always appends; it never edits or removes an existing line in the file (unlike `--set-config`, which updates an
-      existing line for the same key in place).
+      always appends; it never edits or removes an existing line in the file (unlike `--set-config`, which, by the
+      user's decision in fix round 1, removes every existing line for the key and appends one new line).
   - Once every required value is present (whether it was already there, satisfied by an environment variable, or
     just supplied through the prompt), the run continues as normal.
   - `--help` and `--version` never trigger this check, per the issue.
@@ -61,11 +65,13 @@ its folder is removed as part of this feature.
    (`Environment.SpecialFolder.UserProfile`/.config/PodcastGenerator/) if it does not exist.
 2. **AC-2**: Running `PodcastGenerator --set-config <KEY> <VALUE>` creates `PodcastGenerator.env` in that folder if
    it does not exist, then writes `KEY=VALUE` into it.
-3. **AC-3**: If `PodcastGenerator.env` already has a line for `<KEY>` (matched case-insensitively), `--set-config`
-   updates that line in place with `<VALUE>` rather than adding a duplicate line; every other line in the file is
-   left unchanged. If no line for `<KEY>` exists yet, a new `KEY=VALUE` line is added.
+3. **AC-3** (**user decision, fix round 1**, supersedes the earlier update-in-place wording): after `--set-config`
+   the key is unique in `PodcastGenerator.env`. Every existing line for `<KEY>` (matched case-insensitively) is
+   removed and one new `KEY=VALUE` line is appended, spelled as the user typed `<KEY>`; every other line in the file
+   is left unchanged. If no line for `<KEY>` exists yet, the new `KEY=VALUE` line is appended.
 4. **AC-4**: `--set-config` rejects a `<KEY>` that is blank, an empty string, or contains any whitespace, and
-   rejects a `<VALUE>` that is blank, an empty string, or whitespace-only. Either case prints the exact message
+   rejects a `<VALUE>` that is blank, an empty string, or whitespace-only (**user decision, fix round 1:** or that is
+   literally two quote characters, `""` or `''`). Either case prints the exact message
    `Invalid input`, exits with a failure code, and makes no change to `PodcastGenerator.env`.
 5. **AC-5**: `PodcastGenerator --set-config <KEY> <VALUE>` exits without generating a podcast (exit code 0 on
    success), the same way `--help` and `--version` do today.
@@ -78,12 +84,13 @@ its folder is removed as part of this feature.
 8. **AC-8**: For each required value missing from both the file and the environment, the app prints
    `<CONFIG_KEY_NAME_HERE> not found. Please set this config value to continue.` (with the real key name substituted
    for the placeholder) and prompts the user for it interactively on the console.
-9. **AC-9**: The interactive prompt rejects a blank, empty-string, or whitespace-only entry with the exact message
+9. **AC-9**: The interactive prompt rejects a blank, empty-string, or whitespace-only entry (**user decision, fix
+   round 1:** and an entry that is literally two quote characters, `""` or `''`) with the exact message
    `Invalid input`, and re-prompts, up to 5 total attempts for that value. If the 5th attempt is also invalid, the
    run fails with exit code 1 and does not generate a podcast.
 10. **AC-10**: A value accepted from the interactive prompt is appended as a new `KEY=VALUE` line to
     `PodcastGenerator.env` without changing or removing any line already in the file, even if a line for that key
-    already exists (append-only, unlike `--set-config`'s update-in-place behavior in AC-3).
+    already exists (append-only, unlike `--set-config`'s remove-and-append behavior in AC-3).
 11. **AC-11**: Once all required values are present (pre-existing in the file, satisfied by an environment variable,
     or just supplied through the prompt), the invocation proceeds with the original request (script processing,
     etc.) exactly as it does today.
@@ -100,8 +107,11 @@ its folder is removed as part of this feature.
   `CLAUDE.md`, so this works on both Windows and Linux.
 - The key-file format is defined by the existing parser behavior in `CLAUDE.md` (tolerates a BOM and either line
   ending, ignores blank lines and `#` lines, trims spaces and one pair of quotes, ignores other keys, last duplicate
-  wins, empty value treated as missing). `--set-config`'s update-in-place behavior (AC-3) must not otherwise disturb
-  that parser's handling of lines it does not touch.
+  wins, empty value treated as missing). **User decision, fix round 1:** config keys are read case-insensitively, so
+  `openrouter_api_key=x` in the file satisfies the `OPENROUTER_API_KEY` lookup; every other parser rule is unchanged.
+  `--set-config`'s remove-and-append behavior (AC-3) must not otherwise disturb that parser's handling of lines it
+  does not touch. Environment variable handling is unchanged (a whitespace-only environment variable counts as
+  missing).
 - Never log or print the value of `OPENROUTER_API_KEY`, or any other config value entered by the user, per
   `CLAUDE.md`'s existing rule against logging the key.
 - The `OPENROUTER_API_KEY` environment variable is still supported as an alternative source per `CLAUDE.md`; per the
@@ -118,7 +128,7 @@ its folder is removed as part of this feature.
   does not name any; the required-value list mechanism should support more, but no other value is being added now.
 - Removing or changing the `OPENROUTER_API_KEY` environment-variable fallback.
 - Editing or deleting existing values in `PodcastGenerator.env` through the interactive prompt path (only appending
-  is asked for there; `--set-config` is the only path that updates an existing line).
+  is asked for there; `--set-config` is the only path that replaces an existing line).
 - A `--get-config` / list-config command; the issue only asks for setting values.
 
 ## Open questions

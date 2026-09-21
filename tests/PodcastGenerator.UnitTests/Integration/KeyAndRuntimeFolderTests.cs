@@ -57,6 +57,19 @@ public sealed class KeyAndRuntimeFolderTests : IDisposable
         Assert.Equal(FileKey, SentKey());
     }
 
+    // User decision (cli-set-config fix round 1): the key name in the file is read without regard to case.
+    [Fact]
+    public async Task A_lowercase_key_name_in_the_key_file_is_used()
+    {
+        _pipeline.WriteKeyFile($"openrouter_api_key={FileKey}\n");
+
+        var exitCode = await _pipeline.RunAsync(OneLineScript());
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(FileKey, SentKey());
+        Assert.Empty(_pipeline.Prompter.Asked);
+    }
+
     [Fact]
     public async Task The_last_duplicate_in_the_key_file_wins()
     {
@@ -117,6 +130,8 @@ public sealed class KeyAndRuntimeFolderTests : IDisposable
         var error = _pipeline.Err.ToString();
         Assert.Contains(_pipeline.Paths.KeyFilePath, error, StringComparison.Ordinal);
         Assert.Contains("--set-config OPENROUTER_API_KEY", error, StringComparison.Ordinal);
+        // CLAUDE.md, Usage: the error says where the key file goes and what it must contain (the line KEY=<value>).
+        Assert.Contains("OPENROUTER_API_KEY=<value>", error, StringComparison.Ordinal);
         Assert.Equal(["OPENROUTER_API_KEY"], _pipeline.Prompter.Asked);
         Assert.True(Directory.Exists(_pipeline.Paths.RuntimeFolder));
         Assert.True(File.Exists(_pipeline.Paths.KeyFilePath));

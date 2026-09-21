@@ -81,9 +81,9 @@ OPENROUTER_API_KEY not found. Please set this config value to continue.
 OPENROUTER_API_KEY:
 ```
 
-Type or paste the value and press Enter. What you type is not shown on screen and is never printed back. A blank entry is
-rejected with `Invalid input` and you are asked again; after 5 attempts in total the run fails with exit code `1`. A
-valid value is added as a new line at the end of the file. When there is no console input at all (standard input is closed or
+Type or paste the value and press Enter. What you type is not shown on screen and is never printed back. A blank entry, or
+an entry that is only a pair of quote characters (`""` or `''`), is rejected with `Invalid input` and you are asked again;
+after 5 attempts in total the run fails with exit code `1`. A valid value is added as a new line at the end of the file. When there is no console input at all (standard input is closed or
 has ended) the run fails at once with exit code `1` and a message that says how to set the value.
 
 To set or change a value directly, use `--set-config`:
@@ -93,17 +93,20 @@ PodcastGenerator --set-config <KEY> <VALUE>
 PodcastGenerator --set-config OPENROUTER_API_KEY <key>
 ```
 
-It writes `KEY=VALUE` to the config file, creating the folder and the file first if they are missing. When the file already
-has a line for that key (matched without regard to case) the line is updated in place, and every other line is left as it is;
-otherwise a new line is added. `<KEY>` must not be empty or contain any whitespace, `=`, or start with `#`, and `<VALUE>` must not
-be empty or whitespace-only and must be on one line; anything else is rejected with `Invalid input` and the file is not changed.
+It writes `KEY=VALUE` to the config file, creating the folder and the file first if they are missing. A key appears only once
+in the file: every existing line for that key (matched without regard to case, so `openrouter_api_key` and
+`OPENROUTER_API_KEY` are the same key) is removed and one new `KEY=VALUE` line is added at the end, spelled as you typed it. Every
+other line is left as it is, and stays in the same order. `<KEY>` must not be empty or contain any whitespace, `=`, or start with `#`,
+and `<VALUE>` must not be empty or whitespace-only, must not be only a pair of quote characters (`""` or `''`), and must be on one
+line; anything else is rejected with `Invalid input` and the file is not changed.
 Any other key name is accepted, not only the ones the tool needs. The command saves the value and exits; it does not generate a podcast, and it does not print the
 value back. A value typed on the command line can stay in your shell history, so the prompt above is the better way to enter a
 key on a shared machine.
 
 The `OPENROUTER_API_KEY` environment variable also works and counts as present, so no prompt appears when it is set; if both
 the file and the variable are set, the file wins. .NET user-secrets are not used. The file may have a UTF-8 byte order mark, `#`
-comment lines and quotes around the value. On Linux the tool creates the file readable and writable by you only. The tool never
+comment lines and quotes around the value. Key names in the file are read without regard to case, so `openrouter_api_key=<key>`
+works too. On Linux the tool creates the file readable and writable by you only. The tool never
 prints or logs the key.
 
 ## Develop

@@ -16,8 +16,11 @@ public static class ConfigInput
         && !key.Any(char.IsWhiteSpace);
 
     /// <summary>A value must not be empty, blank or whitespace-only (AC-4, AC-9). It must also stay on one line: a line
-    /// break inside the value would write a second line into the file.</summary>
+    /// break inside the value would write a second line into the file. A value that the file parser would read back as
+    /// empty is refused as well: two quote characters (<c>""</c> or <c>''</c>), because the parser removes one pair of
+    /// quotes (user decision, cli-set-config fix round 1). The same check is used for the interactive prompt.</summary>
     public static bool IsValidValue(string? value) =>
         !string.IsNullOrWhiteSpace(value)
-        && value.AsSpan().IndexOfAny('\r', '\n') < 0;
+        && value.AsSpan().IndexOfAny('\r', '\n') < 0
+        && !string.IsNullOrWhiteSpace(EnvFileParser.Unquote(value.Trim()));
 }
