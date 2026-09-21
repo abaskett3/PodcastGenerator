@@ -337,6 +337,25 @@ internal sealed class Pipeline : IDisposable
     {
         var command = Assert.IsType<RunCommand>(CommandLine.Parse(outputPath is null ? [scriptPath] : [scriptPath, outputPath]));
 
+        await using var provider = BuildProvider();
+        return await provider.GetRequiredService<CliRunner>().RunAsync(command, Out, Err, cancellationToken);
+    }
+
+    /// <summary>Runs <c>--set-config &lt;key&gt; &lt;value&gt;</c> through a fresh service provider, the way <c>Program</c> does.</summary>
+    public async Task<int> RunSetConfigAsync(string key, string value, CancellationToken cancellationToken = default)
+    {
+        var command = Assert.IsType<SetConfigCommand>(CommandLine.Parse([CommandLine.SetConfigOption, key, value]));
+
+        await using var provider = BuildProvider();
+        return await provider.GetRequiredService<CliRunner>().SetConfigAsync(command, Out, Err, cancellationToken);
+    }
+
+    /// <summary>The console the config prompt reads from. When null the scripted <see cref="Prompter"/> is used. A test that
+    /// wants the real <c>ConsoleConfigPrompter</c> (with a <c>StringReader</c> for standard input) sets it.</summary>
+    public IConfigPrompter? ConfigPrompter { get; set; }
+
+    private ServiceProvider BuildProvider()
+    {
         var services = new ServiceCollection();
         services.AddPodcastGeneratorApplication();
         services.AddPodcastGeneratorInfrastructure();
@@ -350,11 +369,10 @@ internal sealed class Pipeline : IDisposable
         services.AddSingleton(new SpeechClientOptions(SpeechTimeout));
         services.AddHttpClient<ISpeechClient, OpenRouterSpeechClient>().ConfigurePrimaryHttpMessageHandler(() => Http);
         services.AddSingleton<IRunReporter>(new ConsoleRunReporter(Err));
-        services.AddSingleton<IConfigPrompter>(Prompter);
+        services.AddSingleton(ConfigPrompter ?? Prompter);
         services.AddSingleton<CliRunner>();
 
-        await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
-        return await provider.GetRequiredService<CliRunner>().RunAsync(command, Out, Err, cancellationToken);
+        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
     }
 
     /// <summary>The names of the files and directories directly inside <paramref name="directory"/>, or empty when it

@@ -159,6 +159,43 @@ public sealed class CliProcessTests
         Assert.Contains("--set-config <KEY> <VALUE>", error, StringComparison.Ordinal);
     }
 
+    // cli-set-config, design D-11: --set-config must be the first argument and take exactly two more. Both cases end as a
+    // usage error before any config file is touched, so they are safe against the real built program.
+    [Theory]
+    [InlineData("script.txt", "--set-config", "MY_KEY")]
+    [InlineData("--set-config", "MY_KEY", "value", "extra")]
+    public void Set_config_in_the_wrong_position_or_with_too_many_arguments_is_a_usage_error_and_exits_1(params string[] args)
+    {
+        var (exitCode, output, error) = Run(args);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(output);
+        Assert.StartsWith("Error:", error, StringComparison.Ordinal);
+        Assert.Contains("--set-config <KEY> <VALUE>", error, StringComparison.Ordinal);
+    }
+
+    // cli-set-config AC-12: --help and --version win even next to --set-config, so the process exits 0 and prints the usage or
+    // the version. The --set-config part here has an unusable key, so if it were ever run first nothing could be written.
+    [Fact]
+    public void Help_next_to_set_config_prints_the_usage_and_exits_0()
+    {
+        var (exitCode, output, error) = Run("--set-config", "", "value", "--help");
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("--set-config <KEY> <VALUE>", output, StringComparison.Ordinal);
+        Assert.Empty(error);
+    }
+
+    [Fact]
+    public void Version_next_to_set_config_prints_one_line_and_exits_0()
+    {
+        var (exitCode, output, error) = Run("--set-config", "", "value", "--version");
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(error);
+        Assert.DoesNotContain("--set-config", output, StringComparison.Ordinal);
+    }
+
     // cli-set-config AC-12: help lists the new command and, like version, does not touch the config folder (it would have
     // exited 0 with nothing on standard error).
     [Fact]
