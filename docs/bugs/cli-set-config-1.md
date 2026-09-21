@@ -1,6 +1,10 @@
 # Bug: `--set-config` with a differently cased key renames a working line, so the app no longer finds the key
 
-- Slug: `cli-set-config`, round 1, CODE_HEAD `8323860b6a9283479d177cac49f5de05eaae3d97`. Issue #2.
+- Slug: `cli-set-config`, found in round 1 at CODE_HEAD `8323860b6a9283479d177cac49f5de05eaae3d97`. Issue #2.
+- **Status: FIXED, verified in round 2 at CODE_HEAD `2b9e2900f72788e56b2f103c2cad3cf2e295901e`.** The user decided (fix round 1)
+  that config keys are read case-insensitively and that `--set-config` keeps a key unique (remove every line for the key, append
+  one). The fix commit applies both. See "Verification (round 2)" at the end. The rest of this file is the original report, kept
+  as it was written.
 - Behavior affected: **AC-3** (update the line "in place with `<VALUE>`") together with the spec's Constraints (the file format is
   defined by the existing parser, which matches the key with an exact-case comparison) and **AC-7** (a value is present when the
   file has a non-empty value for it). Design D-8 chose this behavior on purpose, so it needs a decision, not only a code change.
@@ -49,3 +53,21 @@ is case-sensitive. Two fixes are possible and the spec does not pick one:
 
 I have not added a failing test, because the expected result is not fixed by the spec. Once decided, the regression test belongs in
 `ConfigIntegrationTests` next to `Set_config_updates_the_existing_line_in_place_and_leaves_every_other_line_unchanged`.
+
+## Verification (round 2)
+
+The spec now says (marked "user decision, fix round 1"): keys are read case-insensitively (Constraints), and after `--set-config`
+the key is unique, with every line for it removed and one line appended in the typed spelling (AC-3). At `2b9e290`:
+
+- `EnvFileParser.GetValue` compares with `OrdinalIgnoreCase` (`EnvFileParser.cs:33`); `EnvFileEditor.SetValue` removes every line
+  for the key and appends one (`EnvFileEditor.cs:21-25`).
+- Regression tests in `Integration/ConfigIntegrationTests.cs`, all passing:
+  `Set_config_with_a_lowercase_key_keeps_the_key_usable_and_the_file_unique` (the exact reproduction above: the file holds one line,
+  `openrouter_api_key=sk-test-NEW-LOWER`, the parser finds the value, the next run sends it with no prompt),
+  `A_lowercase_key_line_in_the_file_is_present_and_used_without_a_prompt`,
+  `Set_config_leaves_one_line_in_the_spelling_typed_whatever_spellings_the_file_had` (3 typed spellings) and
+  `A_file_with_the_key_in_two_spellings_uses_the_last_one` (2 orders).
+- These tests fail on the pre-fix code and pass on the fix. I ran the round 2 `ConfigIntegrationTests.cs` against the source of my
+  round 1 commit `b32a999` (production code as it was before the fix), in a copy outside the repository: 23 of the 117 tests
+  failed, including all four tests above and the `""` / `''` rows, with the same "saved but missing" outcome as reported here; on
+  `2b9e290` all 117 pass.

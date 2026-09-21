@@ -139,6 +139,8 @@ public sealed class CliProcessTests
     [InlineData("MY KEY", "value")]
     [InlineData("MY_KEY", "")]
     [InlineData("MY_KEY", "   ")]
+    [InlineData("MY_KEY", "\"\"")]
+    [InlineData("MY_KEY", "''")]
     public void Set_config_with_an_unusable_key_or_value_prints_Invalid_input_and_exits_1(string key, string value)
     {
         var (exitCode, output, error) = Run("--set-config", key, value);
@@ -146,6 +148,27 @@ public sealed class CliProcessTests
         Assert.Equal(1, exitCode);
         Assert.Empty(output);
         Assert.Equal("Invalid input", error.TrimEnd('\r', '\n'));
+    }
+
+    // cli-set-config fix round 1, user decision 3: a malformed command line (usage error) skips the config check and fails right
+    // away. The check would print "<KEY> not found. Please set this config value to continue." and wait for input, and with no
+    // key it would fail with a different message; a usage error must show only the error and the usage, exit 1, and finish.
+    // (The real profile cannot be observed here without reading it; Program.cs returns for a UsageError before it builds any
+    // service, and the integration tests show that the check is what prints the not-found message.)
+    [Theory]
+    [InlineData("a.txt", "b.mp3", "c")]
+    [InlineData("--frobnicate")]
+    [InlineData("--set-config", "MY_KEY")]
+    public void A_usage_error_fails_right_away_without_the_config_check_or_a_prompt(params string[] args)
+    {
+        var (exitCode, output, error) = Run(args);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(output);
+        Assert.StartsWith("Error:", error, StringComparison.Ordinal);
+        Assert.DoesNotContain("not found", error, StringComparison.Ordinal);
+        Assert.DoesNotContain("OPENROUTER_API_KEY:", error, StringComparison.Ordinal);
+        Assert.DoesNotContain("Please set this config value", error, StringComparison.Ordinal);
     }
 
     [Fact]

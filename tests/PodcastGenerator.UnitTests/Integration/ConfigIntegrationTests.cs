@@ -114,6 +114,66 @@ public sealed class ConfigIntegrationTests : IDisposable
         Assert.Equal("A=1\nB=2\nMY_KEY=new\n", File.ReadAllText(_pipeline.Paths.KeyFilePath));
     }
 
+    // AC-3 (fix round 1): "every existing line for that key (matched case-insensitively)" goes, "every non-matching line stays
+    // unchanged". The parser's rules decide what a line for the key is: it is trimmed, the key is the text before the first "=",
+    // and a "#" line is a comment. So a line with spaces around the key and quotes around the value is removed; a commented-out
+    // copy, a key that only starts or ends like this one, and other keys are not lines for this key and stay as they are.
+    [Fact]
+    public async Task Set_config_removes_a_padded_key_line_but_keeps_comments_and_keys_that_only_look_similar()
+    {
+        WriteKeyFileBytes(
+            "# OPENROUTER_API_KEY=commented-out\nOPENROUTER_API_KEY_2=other\n  openrouter_api_key = \"old\"  \nMY_OPENROUTER_API_KEY=x\nZ=1\n");
+
+        var exitCode = await _pipeline.RunSetConfigAsync(KeyName, "sk-test-NEW");
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(
+            "# OPENROUTER_API_KEY=commented-out\nOPENROUTER_API_KEY_2=other\nMY_OPENROUTER_API_KEY=x\nZ=1\nOPENROUTER_API_KEY=sk-test-NEW\n",
+            File.ReadAllText(_pipeline.Paths.KeyFilePath));
+        Assert.Equal("sk-test-NEW", KeyValue(File.ReadAllText(_pipeline.Paths.KeyFilePath), KeyName));
+        Assert.Equal("other", KeyValue(File.ReadAllText(_pipeline.Paths.KeyFilePath), "OPENROUTER_API_KEY_2"));
+    }
+
+    // AC-3 (fix round 1): the key is unique after the command whatever spellings the file had, and the spelling typed is the one
+    // that is written. Each typing direction is checked, and the value the next run sends is the new one.
+    [Theory]
+    [InlineData("OPENROUTER_API_KEY")]
+    [InlineData("openrouter_api_key")]
+    [InlineData("OpenRouter_Api_Key")]
+    public async Task Set_config_leaves_one_line_in_the_spelling_typed_whatever_spellings_the_file_had(string typed)
+    {
+        WriteKeyFileBytes("OPENROUTER_API_KEY=sk-test-A\nopenrouter_api_key=sk-test-B\nOpenrouter_Api_Key=sk-test-C\nKEEP=1\n");
+
+        var exitCode = await _pipeline.RunSetConfigAsync(typed, "sk-test-NEW-TYPED");
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(["KEEP=1", $"{typed}=sk-test-NEW-TYPED"], File.ReadAllLines(_pipeline.Paths.KeyFilePath));
+        _pipeline.ResetOutput();
+
+        var runExitCode = await _pipeline.RunAsync(OneLineScript());
+
+        Assert.Equal(0, runExitCode);
+        Assert.Equal("sk-test-NEW-TYPED", SentKey());
+        Assert.Empty(_pipeline.Prompter.Asked);
+    }
+
+    // User decision 1 with CLAUDE.md "the last duplicate wins": a file with the key in two spellings uses the later line,
+    // whichever spelling it has.
+    [Theory]
+    [InlineData("openrouter_api_key=sk-test-FIRST-0001\nOPENROUTER_API_KEY=sk-test-SECOND-0002\n", "sk-test-SECOND-0002")]
+    [InlineData("OPENROUTER_API_KEY=sk-test-FIRST-0001\nopenrouter_api_key=sk-test-SECOND-0002\n", "sk-test-SECOND-0002")]
+    public async Task A_file_with_the_key_in_two_spellings_uses_the_last_one(string contents, string expectedKey)
+    {
+        WriteKeyFileBytes(contents);
+
+        var exitCode = await _pipeline.RunAsync(OneLineScript());
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(expectedKey, SentKey());
+        Assert.Empty(_pipeline.Prompter.Asked);
+        Assert.Equal(contents, File.ReadAllText(_pipeline.Paths.KeyFilePath));
+    }
+
     // The bug the tester found (docs/bugs/cli-set-config-1.md): a working OPENROUTER_API_KEY line and a set-config with a
     // lowercase spelling. Now the key stays present, the file has one line for it (the spelling typed), and the next run uses the
     // new value without a prompt.
@@ -307,6 +367,60 @@ public sealed class ConfigIntegrationTests : IDisposable
         Assert.Equal("Invalid input" + Environment.NewLine, _pipeline.Err.ToString());
         Assert.Equal(before, File.ReadAllBytes(_pipeline.Paths.KeyFilePath));
         Assert.Equal(["PodcastGenerator.env"], Pipeline.Entries(_pipeline.Paths.RuntimeFolder));
+    }
+
+    // Fix round 1, user decision 4 (the coding agent's reading, checked here). The user's decision names the values "" and ''. The
+    // coding agent also rejects a quoted value that is only blanks (" " and '  '), because the parser removes one pair of quotes
+    // and then trims, so it would read such a value back as empty (CLAUDE.md: an empty value is missing) and AC-4 rejects a
+    // whitespace-only value. What this test pins is the property the user's decision is for, not the exact list: after
+    // --set-config a value is either refused with exactly "Invalid input" and the file is not changed, or it was saved and the
+    // app finds it (it is never "saved but missing", which is what the tester saw for "" in round 1).
+    [Theory]
+    [InlineData("\"a\"")]
+    [InlineData("'a'")]
+    [InlineData("\"\"")]
+    [InlineData("''")]
+    [InlineData("\" \"")]
+    [InlineData("'  '")]
+    [InlineData("\"\t\"")]
+    [InlineData("\"'")]
+    [InlineData("\"\"\"")]
+    [InlineData("\"")]
+    [InlineData("'")]
+    [InlineData("\"a b\"")]
+    public async Task A_value_is_either_refused_with_Invalid_input_or_saved_and_found_and_never_saved_but_missing(string value)
+    {
+        WriteKeyFileBytes("# keep\nMY_KEY=old\n");
+        var before = File.ReadAllBytes(_pipeline.Paths.KeyFilePath);
+
+        var exitCode = await _pipeline.RunSetConfigAsync("MY_KEY", value);
+
+        if (exitCode == 0)
+        {
+            Assert.NotNull(EnvFileParser.GetValue(File.ReadAllText(_pipeline.Paths.KeyFilePath), "MY_KEY"));
+        }
+        else
+        {
+            Assert.Equal(1, exitCode);
+            Assert.Equal("Invalid input" + Environment.NewLine, _pipeline.Err.ToString());
+            Assert.Equal(before, File.ReadAllBytes(_pipeline.Paths.KeyFilePath));
+        }
+    }
+
+    // The same values that are ordinary text stay usable (they are not "empty strings"): a single quote character, a quoted word.
+    [Theory]
+    [InlineData("\"a\"")]
+    [InlineData("'a'")]
+    [InlineData("\"")]
+    [InlineData("'")]
+    [InlineData("\"'")]
+    public async Task A_value_that_is_not_an_empty_string_is_still_accepted_with_quote_characters_in_it(string value)
+    {
+        var exitCode = await _pipeline.RunSetConfigAsync("MY_KEY", value);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(_pipeline.Err.ToString());
+        Assert.NotNull(EnvFileParser.GetValue(File.ReadAllText(_pipeline.Paths.KeyFilePath), "MY_KEY"));
     }
 
     // AC-13: a rejected value that is a secret is not printed back either.
@@ -546,6 +660,55 @@ public sealed class ConfigIntegrationTests : IDisposable
         Assert.Single(Regex.Matches(_pipeline.Err.ToString(), Regex.Escape("Invalid input")));
         Assert.Equal(2, Regex.Matches(_pipeline.Err.ToString(), Regex.Escape($"{KeyName}: ")).Count);
         Assert.Equal([$"{KeyName}={TypedKey}"], File.ReadAllLines(_pipeline.Paths.KeyFilePath));
+        Assert.Equal(TypedKey, SentKey());
+    }
+
+    // AC-9 with the coding agent's reading of user decision 4 (see the property test for --set-config): a quoted entry that is
+    // only blanks is read back as empty by the parser, so it is refused at the prompt as well and the person is asked again.
+    [Theory]
+    [InlineData("\" \"")]
+    [InlineData("'  '")]
+    public async Task A_quoted_entry_of_only_blanks_at_the_prompt_is_rejected_and_the_typed_key_is_the_one_saved(string entry)
+    {
+        TypeAtTheConsole(entry, TypedKey);
+
+        var exitCode = await _pipeline.RunAsync(OneLineScript());
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(Regex.Matches(_pipeline.Err.ToString(), Regex.Escape("Invalid input")));
+        Assert.Equal([$"{KeyName}={TypedKey}"], File.ReadAllLines(_pipeline.Paths.KeyFilePath));
+        Assert.Equal(TypedKey, SentKey());
+    }
+
+    // AC-9: five entries of literal quote pairs fail the run with exit code 1, the same as any other five invalid entries.
+    [Fact]
+    public async Task Five_quote_pair_entries_fail_the_run_with_exit_code_1_and_save_nothing()
+    {
+        TypeAtTheConsole("\"\"", "''", "\"\"", "''", "\"\"", TypedKey);
+
+        var exitCode = await _pipeline.RunAsync(OneLineScript());
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(5, Regex.Matches(_pipeline.Err.ToString(), Regex.Escape("Invalid input")).Count);
+        Assert.Empty(_pipeline.Http.Requests);
+        Assert.Equal(string.Empty, File.ReadAllText(_pipeline.Paths.KeyFilePath));
+        Assert.False(File.Exists(_pipeline.DefaultOutputPath));
+    }
+
+    // AC-10 with user decision 1: an existing line for the key with an empty value in another spelling counts as missing (the
+    // parser reads keys without regard to case and an empty value is missing), so the person is asked; the typed value is
+    // appended and the existing lines are not changed or removed (the prompt stays append-only), and the last line wins.
+    [Fact]
+    public async Task The_prompt_stays_append_only_after_an_empty_line_in_another_spelling_of_the_key()
+    {
+        WriteKeyFileBytes("openrouter_api_key=\nOTHER=1\n");
+        TypeAtTheConsole(TypedKey);
+
+        var exitCode = await _pipeline.RunAsync(OneLineScript());
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(NotFoundMessage, ErrLines());
+        Assert.Equal(["openrouter_api_key=", "OTHER=1", $"{KeyName}={TypedKey}"], File.ReadAllLines(_pipeline.Paths.KeyFilePath));
         Assert.Equal(TypedKey, SentKey());
     }
 
