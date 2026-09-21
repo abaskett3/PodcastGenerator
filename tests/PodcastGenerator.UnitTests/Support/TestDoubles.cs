@@ -52,6 +52,36 @@ internal sealed class InMemoryFileSystem : IFileSystem
         return Task.FromResult(true);
     }
 
+    public List<string> PrivateFiles { get; } = [];
+
+    /// <summary>When set, <see cref="ReplacePrivateTextAsync"/> throws it, like a disk that is full or a file that is locked.</summary>
+    public Exception? ReplaceFailure { get; set; }
+
+    public Task<bool> TryWriteNewPrivateTextAsync(string path, string contents, CancellationToken cancellationToken)
+    {
+        if (Files.ContainsKey(path))
+        {
+            return Task.FromResult(false);
+        }
+
+        Files[path] = contents;
+        PrivateFiles.Add(path);
+        return Task.FromResult(true);
+    }
+
+    public Task ReplacePrivateTextAsync(string path, string contents, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (ReplaceFailure is not null)
+        {
+            throw ReplaceFailure;
+        }
+
+        Files[path] = contents;
+        PrivateFiles.Add(path);
+        return Task.CompletedTask;
+    }
+
     public void MoveFile(string source, string destination)
     {
         if (Files.ContainsKey(destination))
@@ -80,6 +110,28 @@ internal sealed class FakeEnvironmentVariables : IEnvironmentVariables
     public Dictionary<string, string> Values { get; } = new(StringComparer.Ordinal);
 
     public string? Get(string name) => Values.TryGetValue(name, out var value) ? value : null;
+}
+
+/// <summary>A console that answers from a script instead of a person. <see cref="Answers"/> are returned one per request; when
+/// they run out the console has no input left (<see langword="null"/>), like a closed standard input.</summary>
+internal sealed class FakeConfigPrompter : IConfigPrompter
+{
+    private int _next;
+
+    public List<string?> Answers { get; } = [];
+
+    public List<string> Messages { get; } = [];
+
+    public List<string> Asked { get; } = [];
+
+    public void Tell(string message) => Messages.Add(message);
+
+    public Task<string?> ReadValueAsync(string keyName, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Asked.Add(keyName);
+        return Task.FromResult(_next < Answers.Count ? Answers[_next++] : null);
+    }
 }
 
 internal sealed class FakeDefaultResources : IDefaultResources

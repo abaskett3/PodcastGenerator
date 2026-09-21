@@ -283,6 +283,9 @@ internal sealed class Pipeline : IDisposable
 
     public FakeEnvironmentVariables Environment { get; } = new();
 
+    /// <summary>The console, answered from a script. With no answers it behaves like a closed standard input.</summary>
+    public FakeConfigPrompter Prompter { get; } = new();
+
     public FakeDelayer Delayer { get; } = new();
 
     public RecordingWorkspaceFactory Workspaces { get; } = new();
@@ -347,6 +350,7 @@ internal sealed class Pipeline : IDisposable
         services.AddSingleton(new SpeechClientOptions(SpeechTimeout));
         services.AddHttpClient<ISpeechClient, OpenRouterSpeechClient>().ConfigurePrimaryHttpMessageHandler(() => Http);
         services.AddSingleton<IRunReporter>(new ConsoleRunReporter(Err));
+        services.AddSingleton<IConfigPrompter>(Prompter);
         services.AddSingleton<CliRunner>();
 
         await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });

@@ -13,6 +13,7 @@ only and are not rendered as sound.
 
 ```text
 PodcastGenerator <scriptPath> [outputPath]
+PodcastGenerator --set-config <KEY> <VALUE>
 PodcastGenerator --help
 PodcastGenerator --version
 ```
@@ -21,6 +22,7 @@ PodcastGenerator --version
 |---|---|
 | `<scriptPath>` | An existing `.txt` file (the extension is matched case-insensitively). `.md` and every other extension are rejected. Up to about 3000 lines; longer scripts are still processed. |
 | `[outputPath]` | Optional. Either an `.mp3` file path (missing folders are created) or an existing directory (the file is written inside it). Any other extension is an error. |
+| `--set-config <KEY> <VALUE>` | Saves a config value, such as the API key, and exits. See [The API key and the config file](#the-api-key-and-the-config-file). |
 
 Exit code `0` means success; `1` means anything failed. The full path of the written file is printed on standard output;
 progress (`chunk k of n`) and warnings go to standard error. Ctrl+C stops the run and removes any partial output.
@@ -56,9 +58,9 @@ The file is created from the default embedded in the executable the first time t
 must contain the placeholder `{transcript}` exactly once, where the script text goes. If the file is unusable the tool says so
 and names the file; deleting it restores the default.
 
-### Where the API key goes
+### The API key and the config file
 
-The tool needs an OpenRouter API key. Put it in a file named `PodcastGenerator.env` in the runtime folder, as one line:
+The tool needs an OpenRouter API key. It keeps it in a file named `PodcastGenerator.env` in the runtime folder, as one line:
 
 ```text
 OPENROUTER_API_KEY=<key>
@@ -66,14 +68,43 @@ OPENROUTER_API_KEY=<key>
 
 where `<key>` is your OpenRouter API key.
 
-| Platform | Full path of the key file |
+| Platform | Full path of the config file |
 |---|---|
 | Windows | `C:\Users\<you>\.config\PodcastGenerator\PodcastGenerator.env` |
 | Linux | `/home/<you>/.config/PodcastGenerator/PodcastGenerator.env` |
 
-The `OPENROUTER_API_KEY` environment variable also works; if both are set, the file wins. .NET user-secrets are not used. The
-file may have a UTF-8 byte order mark, `#` comment lines and quotes around the value. The tool never prints or logs the key. If
-no key is found it stops with a message that names the file path above and the line it must contain.
+You do not create this folder or file yourself. The tool creates them the first time it runs, and when a required value is
+missing it asks for it:
+
+```text
+OPENROUTER_API_KEY not found. Please set this config value to continue.
+OPENROUTER_API_KEY:
+```
+
+Type or paste the value and press Enter. What you type is not shown on screen and is never printed back. A blank entry is
+rejected with `Invalid input` and you are asked again; after 5 attempts in total the run fails with exit code `1`. A
+valid value is added as a new line at the end of the file. When there is no console input at all (standard input is closed or
+has ended) the run fails at once with exit code `1` and a message that says how to set the value.
+
+To set or change a value directly, use `--set-config`:
+
+```text
+PodcastGenerator --set-config <KEY> <VALUE>
+PodcastGenerator --set-config OPENROUTER_API_KEY <key>
+```
+
+It writes `KEY=VALUE` to the config file, creating the folder and the file first if they are missing. When the file already
+has a line for that key (matched without regard to case) the line is updated in place, and every other line is left as it is;
+otherwise a new line is added. `<KEY>` must not be empty or contain any whitespace, `=`, or start with `#`, and `<VALUE>` must not
+be empty or whitespace-only and must be on one line; anything else is rejected with `Invalid input` and the file is not changed.
+Any other key name is accepted, not only the ones the tool needs. The command saves the value and exits; it does not generate a podcast, and it does not print the
+value back. A value typed on the command line can stay in your shell history, so the prompt above is the better way to enter a
+key on a shared machine.
+
+The `OPENROUTER_API_KEY` environment variable also works and counts as present, so no prompt appears when it is set; if both
+the file and the variable are set, the file wins. .NET user-secrets are not used. The file may have a UTF-8 byte order mark, `#`
+comment lines and quotes around the value. On Linux the tool creates the file readable and writable by you only. The tool never
+prints or logs the key.
 
 ## Develop
 

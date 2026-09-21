@@ -16,6 +16,15 @@ public interface IFileSystem
     /// <summary>Writes a new file. Returns <see langword="false"/> and changes nothing when the file already exists.</summary>
     Task<bool> TryWriteNewTextAsync(string path, string contents, CancellationToken cancellationToken);
 
+    /// <summary>Like <see cref="TryWriteNewTextAsync"/>, for a file that may hold a secret: on Unix the new file can be
+    /// read and written by its owner only.</summary>
+    Task<bool> TryWriteNewPrivateTextAsync(string path, string contents, CancellationToken cancellationToken);
+
+    /// <summary>Replaces the whole contents of a file (creating it when missing) as one step, so a failure part way never
+    /// leaves a half-written file. The result is UTF-8 without a byte order mark. On Unix only the owner can read and write
+    /// it. Used for the key file.</summary>
+    Task ReplacePrivateTextAsync(string path, string contents, CancellationToken cancellationToken);
+
     /// <summary>Moves a file. Throws <see cref="IOException"/> when the destination already exists; never overwrites.</summary>
     void MoveFile(string source, string destination);
 

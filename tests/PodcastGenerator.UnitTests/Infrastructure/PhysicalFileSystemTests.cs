@@ -88,6 +88,73 @@ public sealed class PhysicalFileSystemTests : IDisposable
         Assert.False(_fileSystem.FileExists(nested));
     }
 
+    // cli-set-config: the key file is written privately and replaced as one step.
+    [Fact]
+    public async Task A_new_private_file_is_written_as_utf8_without_a_byte_order_mark_and_is_owner_only_on_Unix()
+    {
+        var written = await _fileSystem.TryWriteNewPrivateTextAsync(PathOf("PodcastGenerator.env"), "KEY=café\n", CancellationToken.None);
+
+        Assert.True(written);
+        Assert.Equal(Encoding.UTF8.GetBytes("KEY=café\n"), await File.ReadAllBytesAsync(PathOf("PodcastGenerator.env")));
+        AssertOwnerOnlyOnUnix(PathOf("PodcastGenerator.env"));
+    }
+
+    [Fact]
+    public async Task An_existing_file_is_left_untouched_by_a_new_private_write()
+    {
+        await File.WriteAllTextAsync(PathOf("PodcastGenerator.env"), "KEY=mine\n");
+
+        var written = await _fileSystem.TryWriteNewPrivateTextAsync(PathOf("PodcastGenerator.env"), string.Empty, CancellationToken.None);
+
+        Assert.False(written);
+        Assert.Equal("KEY=mine\n", await File.ReadAllTextAsync(PathOf("PodcastGenerator.env")));
+    }
+
+    [Fact]
+    public async Task Replacing_creates_a_missing_file_and_replaces_an_existing_one_leaving_no_temporary_file()
+    {
+        await _fileSystem.ReplacePrivateTextAsync(PathOf("PodcastGenerator.env"), "A=1\n", CancellationToken.None);
+        Assert.Equal("A=1\n", await File.ReadAllTextAsync(PathOf("PodcastGenerator.env")));
+
+        await _fileSystem.ReplacePrivateTextAsync(PathOf("PodcastGenerator.env"), "A=1\nB=2\n", CancellationToken.None);
+
+        Assert.Equal("A=1\nB=2\n", await File.ReadAllTextAsync(PathOf("PodcastGenerator.env")));
+        Assert.Equal(["PodcastGenerator.env"], Directory.GetFileSystemEntries(_directory).Select(Path.GetFileName));
+        AssertOwnerOnlyOnUnix(PathOf("PodcastGenerator.env"));
+    }
+
+    [Fact]
+    public async Task A_replaced_file_has_no_byte_order_mark()
+    {
+        await File.WriteAllBytesAsync(PathOf("PodcastGenerator.env"), [.. Encoding.UTF8.GetPreamble(), .. Encoding.UTF8.GetBytes("A=1\n")]);
+
+        await _fileSystem.ReplacePrivateTextAsync(PathOf("PodcastGenerator.env"), "A=1\n", CancellationToken.None);
+
+        Assert.Equal(Encoding.UTF8.GetBytes("A=1\n"), await File.ReadAllBytesAsync(PathOf("PodcastGenerator.env")));
+    }
+
+    [Fact]
+    public async Task A_failed_replace_leaves_the_target_as_it_was_and_removes_the_temporary_file()
+    {
+        // A directory at the target path makes the final move fail after the new file has been written.
+        Directory.CreateDirectory(PathOf("PodcastGenerator.env"));
+
+        await Assert.ThrowsAnyAsync<Exception>(() => _fileSystem.ReplacePrivateTextAsync(PathOf("PodcastGenerator.env"), "A=1\n", CancellationToken.None));
+
+        Assert.True(Directory.Exists(PathOf("PodcastGenerator.env")));
+        Assert.Equal(["PodcastGenerator.env"], Directory.GetFileSystemEntries(_directory).Select(Path.GetFileName));
+    }
+
+    /// <summary>Unix only: <c>FileStreamOptions.UnixCreateMode</c> is not available on Windows, where the file inherits its
+    /// folder's permissions. The Linux job of the pull request workflow runs this check.</summary>
+    private static void AssertOwnerOnlyOnUnix(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+        }
+    }
+
     [Fact]
     public void Environment_variables_are_read_from_the_process()
     {

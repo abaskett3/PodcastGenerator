@@ -23,6 +23,8 @@ public static class DependencyInjection
         services.AddSingleton<IRuntimeInitializer, RuntimeInitializer>();
         services.AddSingleton<IStyleProvider, StyleProvider>();
         services.AddSingleton<IApiKeyProvider, ApiKeyProvider>();
+        services.AddSingleton(new RequiredConfig([ApiKeyProvider.KeyName]));
+        services.AddSingleton<IConfigService, ConfigService>();
         services.AddSingleton<IPodcastGenerationService, PodcastGenerationService>();
         return services;
     }

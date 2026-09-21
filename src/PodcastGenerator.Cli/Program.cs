@@ -17,33 +17,46 @@ switch (command)
         Console.Error.WriteLine($"Error: {usageError.Message}");
         Console.Error.WriteLine(CommandLine.Usage);
         return 1;
+    case SetConfigCommand setConfig:
+        using (var cancellation = new CancellationTokenSource())
+        {
+            CancelOnCtrlC(cancellation);
+            await using var provider = BuildProvider();
+            return await provider.GetRequiredService<CliRunner>()
+                .SetConfigAsync(setConfig, Console.Out, Console.Error, cancellation.Token)
+                .ConfigureAwait(false);
+        }
+
     case RunCommand run:
         using (var cancellation = new CancellationTokenSource())
         {
-            Console.CancelKeyPress += (_, eventArgs) =>
-            {
-                // Ctrl+C cancels the run so the temporary and partial files are removed before the process ends.
-                eventArgs.Cancel = true;
-                cancellation.Cancel();
-            };
-
-            return await RunAsync(run, cancellation.Token).ConfigureAwait(false);
+            CancelOnCtrlC(cancellation);
+            await using var provider = BuildProvider();
+            return await provider.GetRequiredService<CliRunner>()
+                .RunAsync(run, Console.Out, Console.Error, cancellation.Token)
+                .ConfigureAwait(false);
         }
 
     default:
         return 1;
 }
 
-static async Task<int> RunAsync(RunCommand run, CancellationToken cancellationToken)
+static void CancelOnCtrlC(CancellationTokenSource cancellation) =>
+    Console.CancelKeyPress += (_, eventArgs) =>
+    {
+        // Ctrl+C cancels the run so the temporary and partial files are removed before the process ends.
+        eventArgs.Cancel = true;
+        cancellation.Cancel();
+    };
+
+static ServiceProvider BuildProvider()
 {
     var services = new ServiceCollection();
     services.AddPodcastGeneratorApplication();
     services.AddPodcastGeneratorInfrastructure();
     services.AddSingleton<IRunReporter, ConsoleRunReporter>();
+    services.AddSingleton<IConfigPrompter, ConsoleConfigPrompter>();
     services.AddSingleton<CliRunner>();
 
-    await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
-    return await provider.GetRequiredService<CliRunner>()
-        .RunAsync(run, Console.Out, Console.Error, cancellationToken)
-        .ConfigureAwait(false);
+    return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
 }
